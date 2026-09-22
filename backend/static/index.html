@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fleet Tracker</title>
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"
+    crossorigin=""
+  />
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --panel-bg: rgba(255, 255, 255, 0.9);
+      --panel-strong: #ffffff;
+      --text: #182332;
+      --muted: #5c6b7a;
+      --border: rgba(24, 35, 50, 0.12);
+      --shadow: 0 12px 32px rgba(14, 26, 42, 0.18);
+      --online: #1bbf5c;
+      --stale: #f2a93b;
+      --offline: #7f8a9b;
+      --accent: #2364d2;
+      --danger: #d95050;
+      --card-bg: rgba(255,255,255,0.95);
+      --map-filter: none;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1724;
+        --panel-bg: rgba(14, 22, 31, 0.88);
+        --panel-strong: #121d2b;
+        --text: #edf2f8;
+        --muted: #a9b7c8;
+        --border: rgba(173, 188, 205, 0.18);
+        --shadow: 0 12px 32px rgba(0, 0, 0, 0.38);
+        --card-bg: rgba(18, 29, 43, 0.96);
+        --map-filter: brightness(0.9) saturate(1.1) contrast(1.05);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      overflow: hidden;
+    }
+
+    #app {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      filter: var(--map-filter);
+    }
+
+    .topbar {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      pointer-events: none;
+    }
+
+    .topbar-inner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      pointer-events: auto;
+      background: var(--panel-bg);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      border-radius: 14px;
+      padding: 8px 12px;
+      backdrop-filter: blur(6px);
+    }
+
+    .counter {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.08);
+      min-width: 92px;
+      justify-content: center;
+    }
+
+    .counter .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .counter strong {
+      font-size: 1rem;
+    }
+
+    .status-online { color: var(--online); }
+    .status-stale { color: var(--stale); }
+    .status-offline { color: var(--offline); }
+
+    .counter.online .dot { background: var(--online); }
+    .counter.stale .dot { background: var(--stale); }
+    .counter.offline .dot { background: var(--offline); }
+
+    .pulse {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--online);
+      box-shadow: 0 0 0 0 rgba(27, 191, 92, 0.8);
+      animation: pulse 1.8s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(27, 191, 92, 0.7); }
+      70% { box-shadow: 0 0 0 10px rgba(27, 191, 92, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(27, 191, 92, 0); }
+    }
+
+    .sidebar {
+      position: absolute;
+      top: 80px;
+      left: 12px;
+      bottom: 12px;
+      width: min(360px, 30vw);
+      min-width: 260px;
+      z-index: 600;
+      display: flex;
+      flex-direction: column;
+      background: var(--panel-bg);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      border-radius: 18px;
+      overflow: hidden;
+      backdrop-filter: blur(6px);
+      transition: transform 0.2s ease;
+    }
+
+    .sidebar.collapsed {
+      transform: translateX(calc(-100% + 22px));
+    }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+    }
+
+    .sidebar-toggle {
+      border: none;
+      background: transparent;
+      color: var(--text);
+      font-size: 1.1rem;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 8px;
+    }
+
+    .sidebar-toggle:hover { background: rgba(128, 128, 128, 0.08); }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+    }
+
+    .search-wrap {
+      position: relative;
+      flex: 1;
+    }
+
+    .search-wrap input {
+      width: 100%;
+      padding: 10px 12px 10px 36px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel-strong);
+      color: var(--text);
+      outline: none;
+    }
+
+    .search-wrap::before {
+      content: "🔎";
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      opacity: 0.7;
+      font-size: 0.9rem;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 10px;
+      background: var(--accent);
+      color: white;
+      padding: 9px 12px;
+      cursor: pointer;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .btn.secondary {
+      background: rgba(35, 100, 210, 0.12);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .list {
+      overflow: auto;
+      flex: 1;
+      padding: 8px;
+    }
+
+    .driver-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.04);
+      border-radius: 12px;
+      margin-bottom: 8px;
+      padding: 10px 12px;
+      text-align: left;
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+
+    .driver-item:hover {
+      border-color: rgba(35, 100, 210, 0.4);
+      transform: translateY(-1px);
+    }
+
+    .driver-item.active {
+      border-color: rgba(35, 100, 210, 0.8);
+      box-shadow: inset 0 0 0 1px rgba(35, 100, 210, 0.2);
+    }
+
+    .driver-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.6);
+    }
+
+    .driver-main {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .driver-name {
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .driver-meta {
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-top: 3px;
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+    }
+
+    .driver-speed {
+      font-size: 0.78rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .login-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 18, 28, 0.38);
+      backdrop-filter: blur(4px);
+    }
+
+    .login-box {
+      width: min(420px, calc(100vw - 32px));
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 22px 20px 18px;
+    }
+
+    .login-box h2 {
+      margin: 0 0 14px;
+      font-size: 1.5rem;
+    }
+
+    .login-box label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .login-box input {
+      width: 100%;
+      font-size: 1rem;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel-strong);
+      color: var(--text);
+    }
+
+    .login-box .error {
+      color: var(--danger);
+      margin-bottom: 12px;
+      min-height: 20px;
+      font-size: 0.9rem;
+    }
+
+    .login-box button {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 10px;
+      background: var(--accent);
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .leaflet-popup-content-wrapper,
+    .leaflet-popup-tip {
+      background: var(--card-bg);
+      color: var(--text);
+    }
+
+    .driver-card {
+      min-width: 220px;
+      max-width: 280px;
+      font-size: 0.95rem;
+    }
+
+    .driver-card h3 {
+      margin: 0 0 8px;
+      font-size: 1.1rem;
+    }
+
+    .driver-card .row {
+      margin: 5px 0;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .driver-card a {
+      color: var(--accent);
+    }
+
+    .status-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    .status-chip.online { background: rgba(27, 191, 92, 0.15); color: var(--online); }
+    .status-chip.stale { background: rgba(242, 169, 59, 0.15); color: var(--stale); }
+    .status-chip.offline { background: rgba(127, 138, 155, 0.15); color: var(--offline); }
+
+    .live-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      color: var(--muted);
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(128,128,128,0.08);
+      border: 1px solid var(--border);
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--stale);
+    }
+
+    .live-dot.live { background: var(--online); }
+    .live-dot.reconnect { background: var(--stale); }
+
+    @media (max-width: 720px) {
+      .sidebar {
+        top: auto;
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+        width: auto;
+        min-width: 0;
+        height: 52vh;
+        border-radius: 16px;
+      }
+
+      .topbar {
+        left: 8px;
+        right: 8px;
+        top: 8px;
+      }
+
+      .topbar-inner {
+        gap: 8px;
+        padding: 7px 10px;
+        overflow-x: auto;
+      }
+
+      .counter {
+        min-width: 78px;
+        padding: 7px 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="map"></div>
+
+    <div class="topbar">
+      <div class="topbar-inner">
+        <div class="counter online"><span class="dot"></span><strong id="counter-online">0</strong></div>
+        <div class="counter stale"><span class="dot"></span><strong id="counter-stale">0</strong></div>
+        <div class="counter offline"><span class="dot"></span><strong id="counter-offline">0</strong></div>
+        <div class="live-indicator">
+          <span id="live-dot" class="live-dot reconnect"></span>
+          <span id="live-text">Reconnecting</span>
+        </div>
+      </div>
+    </div>
+
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <strong>Drivers</strong>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="collapseBtn" class="sidebar-toggle" type="button" aria-label="Collapse sidebar">☰</button>
+          <button id="logoutBtn" class="btn secondary" type="button">Log out</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="search-wrap">
+          <input id="searchInput" type="text" placeholder="Search driver" aria-label="Search driver" />
+        </div>
+        <button id="fitBtn" class="btn" type="button">Fit all</button>
+      </div>
+      <div id="driverList" class="list"></div>
+    </aside>
+
+    <div id="loginOverlay" class="login-overlay">
+      <div class="login-box">
+        <h2>Fleet Tracker</h2>
+        <label for="adminKeyInput">Admin key</label>
+        <input id="adminKeyInput" type="password" placeholder="Enter admin key" />
+        <div id="loginError" class="error"></div>
+        <button id="loginBtn" type="button">Open dashboard</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" crossorigin=""></script>
+  <script>
+    const ADMIN_KEY_STORAGE_KEY = 'fleet_tracker_admin_key';
+    const TUNIS_CENTER = [36.8065, 10.1815];
+    const STATUS = {
+      ONLINE: 'online',
+      STALE: 'stale',
+      OFFLINE: 'offline'
+    };
+
+    const state = {
+      drivers: new Map(),
+      selectedDriverId: null,
+      ws: null,
+      reconnectTimer: null,
+      liveStatus: 'reconnecting',
+      search: '',
+      lastRefreshAt: 0
+    };
+
+    const map = L.map('map', { zoomControl: true }).setView(TUNIS_CENTER, 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    const markerLayer = L.layerGroup().addTo(map);
+    const driverMap = new Map();
+
+    const elements = {
+      loginOverlay: document.getElementById('loginOverlay'),
+      adminKeyInput: document.getElementById('adminKeyInput'),
+      loginError: document.getElementById('loginError'),
+      loginBtn: document.getElementById('loginBtn'),
+      logoutBtn: document.getElementById('logoutBtn'),
+      driverList: document.getElementById('driverList'),
+      fitBtn: document.getElementById('fitBtn'),
+      searchInput: document.getElementById('searchInput'),
+      counterOnline: document.getElementById('counter-online'),
+      counterStale: document.getElementById('counter-stale'),
+      counterOffline: document.getElementById('counter-offline'),
+      liveText: document.getElementById('live-text'),
+      liveDot: document.getElementById('live-dot'),
+      sidebar: document.getElementById('sidebar'),
+      collapseBtn: document.getElementById('collapseBtn')
+    };
+
+    function escapeHtml(value) {
+      const text = String(value ?? '');
+      return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function getAdminKey() {
+      return sessionStorage.getItem(ADMIN_KEY_STORAGE_KEY) || '';
+    }
+
+    function setAdminKey(value) {
+      if (value) {
+        sessionStorage.setItem(ADMIN_KEY_STORAGE_KEY, value);
+      } else {
+        sessionStorage.removeItem(ADMIN_KEY_STORAGE_KEY);
+      }
+    }
+
+    function getDriverStatus(driver) {
+      if (!driver || driver.lat == null || driver.lng == null) {
+        return STATUS.OFFLINE;
+      }
+      if (driver.online === 1) {
+        const now = Date.now() / 1000;
+        if (now - Number(driver.recorded_at || 0) <= 60) {
+          return STATUS.ONLINE;
+        }
+        return STATUS.STALE;
+      }
+      return STATUS.OFFLINE;
+    }
+
+    function getStatusColor(driver) {
+      const status = getDriverStatus(driver);
+      if (status === STATUS.ONLINE) return '#1bbf5c';
+      if (status === STATUS.STALE) return '#f2a93b';
+      return '#7f8a9b';
+    }
+
+    function getStatusLabel(driver) {
+      const status = getDriverStatus(driver);
+      if (status === STATUS.ONLINE) return 'online';
+      if (status === STATUS.STALE) return 'stale';
+      return 'offline';
+    }
+
+    function formatSpeedKmh(speedMps) {
+      if (speedMps == null || Number.isNaN(Number(speedMps))) return '—';
+      const value = Number(speedMps) * 3.6;
+      return `${value.toFixed(1)} km/h`;
+    }
+
+    function formatLastSeen(driver) {
+      if (driver == null || driver.recorded_at == null) {
+        return 'never';
+      }
+      const secs = Math.max(0, Math.floor((Date.now() / 1000) - Number(driver.recorded_at)));
+      if (secs < 60) return `${secs} s ago`;
+      const mins = Math.floor(secs / 60);
+      if (mins < 60) return `${mins} min ago`;
+      const hours = Math.floor(mins / 60);
+      return `${hours} h ago`;
+    }
+
+    function makeDriverIcon(driver) {
+      const color = getStatusColor(driver);
+      const arrow = document.createElement('div');
+      arrow.className = 'driver-marker';
+      arrow.style.width = '18px';
+      arrow.style.height = '18px';
+      arrow.style.borderRadius = '50%';
+      arrow.style.background = color;
+      arrow.style.border = '2px solid rgba(255,255,255,0.9)';
+      arrow.style.boxShadow = '0 2px 6px rgba(0,0,0,0.28)';
+      arrow.style.position = 'relative';
+      arrow.style.transition = 'transform 0.3s ease';
+      arrow.style.transform = 'rotate(0deg)';
+      arrow.style.display = 'flex';
+      arrow.style.alignItems = 'center';
+      arrow.style.justifyContent = 'center';
+      arrow.style.fontSize = '12px';
+      arrow.style.color = '#fff';
+      arrow.style.fontWeight = '700';
+
+      const needle = document.createElement('span');
+      needle.textContent = '→';
+      needle.style.display = 'block';
+      needle.style.transform = `rotate(${Number(driver.heading || 0)}deg)`;
+      needle.style.transition = 'transform 0.25s ease';
+      needle.style.pointerEvents = 'none';
+      arrow.appendChild(needle);
+
+      return L.divIcon({
+        className: 'custom-driver-icon',
+        html: arrow.outerHTML,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+        popupAnchor: [0, -14]
+      });
+    }
+
+    function updateMarker(driver) {
+      const id = Number(driver.id);
+      const marker = driverMap.get(id);
+      if (!driver || driver.lat == null || driver.lng == null) {
+        if (marker) {
+          markerLayer.removeLayer(marker);
+          driverMap.delete(id);
+        }
+        return;
+      }
+
+      if (!marker) {
+        const newMarker = L.marker([driver.lat, driver.lng], {
+          icon: makeDriverIcon(driver),
+          keyboard: false
+        }).addTo(markerLayer);
+
+        newMarker.on('click', () => {
+          state.selectedDriverId = id;
+          renderList();
+          openDriverCard(driver);
+        });
+
+        driverMap.set(id, newMarker);
+      } else {
+        marker.setLatLng([driver.lat, driver.lng]);
+        marker.setIcon(makeDriverIcon(driver));
+      }
+    }
+
+    function openDriverCard(driver) {
+      const status = getDriverStatus(driver);
+      const statusClass = status === STATUS.ONLINE ? 'online' : status === STATUS.STALE ? 'stale' : 'offline';
+      const phoneLink = `<a href="tel:${escapeHtml(driver.phone || '')}">${escapeHtml(driver.phone || '—')}</a>`;
+      const content = `
+        <div class="driver-card">
+          <h3>${escapeHtml(driver.name || 'Unknown driver')}</h3>
+          <div class="status-chip ${statusClass}">${status}</div>
+          <div class="row"><span>Phone</span><span>${phoneLink}</span></div>
+          <div class="row"><span>Speed</span><span>${escapeHtml(formatSpeedKmh(driver.speed))}</span></div>
+          <div class="row"><span>Last seen</span><span>${escapeHtml(formatLastSeen(driver))}</span></div>
+        </div>
+      `;
+      const marker = driverMap.get(Number(driver.id));
+      if (marker) {
+        marker.bindPopup(content).openPopup();
+      }
+    }
+
+    function renderCounters() {
+      const drivers = Array.from(state.drivers.values());
+      const online = drivers.filter((d) => getDriverStatus(d) === STATUS.ONLINE).length;
+      const stale = drivers.filter((d) => getDriverStatus(d) === STATUS.STALE).length;
+      const offline = drivers.filter((d) => getDriverStatus(d) === STATUS.OFFLINE).length;
+
+      elements.counterOnline.textContent = String(online);
+      elements.counterStale.textContent = String(stale);
+      elements.counterOffline.textContent = String(offline);
+    }
+
+    function renderList() {
+      const query = elements.searchInput.value.trim().toLowerCase();
+      let rows = Array.from(state.drivers.values());
+      rows = rows.filter((driver) => {
+        if (!query) return true;
+        return `${driver.name || ''} ${driver.phone || ''}`.toLowerCase().includes(query);
+      });
+
+      rows.sort((a, b) => {
+        const statusOrder = { [STATUS.ONLINE]: 0, [STATUS.STALE]: 1, [STATUS.OFFLINE]: 2 };
+        const byStatus = statusOrder[getDriverStatus(a)] - statusOrder[getDriverStatus(b)];
+        if (byStatus !== 0) return byStatus;
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
+
+      if (!rows.length) {
+        elements.driverList.innerHTML = '<div style="padding:12px;color:var(--muted);">No drivers found.</div>';
+        return;
+      }
+
+      const html = rows.map((driver) => {
+        const status = getDriverStatus(driver);
+        const statusColor = getStatusColor(driver);
+        const isActive = Number(state.selectedDriverId) === Number(driver.id);
+        const name = escapeHtml(driver.name || 'Unknown driver');
+        const phone = escapeHtml(driver.phone || '—');
+        const speedText = escapeHtml(formatSpeedKmh(driver.speed));
+        const lastSeen = escapeHtml(formatLastSeen(driver));
+
+        return `
+          <button class="driver-item ${isActive ? 'active' : ''}" data-id="${escapeHtml(driver.id)}" type="button">
+            <span class="driver-dot" style="background:${statusColor};"></span>
+            <span class="driver-main">
+              <span class="driver-name">${name}</span>
+              <span class="driver-meta">
+                <span>${phone}</span>
+                <span>${status}</span>
+              </span>
+            </span>
+            <span class="driver-speed">${speedText}<br>${lastSeen}</span>
+          </button>
+        `;
+      }).join('');
+
+      elements.driverList.innerHTML = html;
+
+      elements.driverList.querySelectorAll('.driver-item').forEach((row) => {
+        row.addEventListener('click', () => {
+          const id = Number(row.dataset.id);
+          const driver = state.drivers.get(id);
+          state.selectedDriverId = id;
+          renderList();
+          if (driver) {
+            openDriverCard(driver);
+          }
+        });
+      });
+    }
+
+    function updateDriverListState() {
+      for (const driver of state.drivers.values()) {
+        updateMarker(driver);
+      }
+      renderCounters();
+      renderList();
+      maybeFitMap();
+    }
+
+    function maybeFitMap() {
+      const drivers = Array.from(state.drivers.values()).filter((d) => d.lat != null && d.lng != null);
+      if (!drivers.length) {
+        map.setView(TUNIS_CENTER, 11);
+        return;
+      }
+      const bounds = L.latLngBounds(drivers.map((d) => [d.lat, d.lng]));
+      map.fitBounds(bounds.pad(0.22), { animate: true });
+    }
+
+    function setLiveStatus(label, isLive) {
+      state.liveStatus = label;
+      elements.liveText.textContent = label === 'Live' ? 'Live' : 'Reconnecting';
+      elements.liveDot.classList.toggle('live', isLive);
+      elements.liveDot.classList.toggle('reconnect', !isLive);
+    }
+
+    function setDriver(driver) {
+      state.drivers.set(Number(driver.id), driver);
+      updateDriverListState();
+    }
+
+    function handleLocationEvent(event) {
+      const driver = state.drivers.get(Number(event.driver_id));
+      const next = driver ? { ...driver } : { id: Number(event.driver_id), name: event.name || '', phone: '', online: 0, lat: null, lng: null, speed: null, heading: null, accuracy: null, recorded_at: null };
+      next.name = event.name || next.name || 'Unknown driver';
+      next.lat = Number(event.lat);
+      next.lng = Number(event.lng);
+      next.speed = event.speed ?? next.speed ?? null;
+      next.heading = event.heading ?? next.heading ?? 0;
+      next.recorded_at = Number(event.recorded_at);
+      next.online = 1;
+      state.drivers.set(Number(event.driver_id), next);
+      updateDriverListState();
+    }
+
+    function handleStatusEvent(event) {
+      const driver = state.drivers.get(Number(event.driver_id));
+      const next = driver ? { ...driver } : { id: Number(event.driver_id), name: 'Unknown driver', phone: '', online: 0, lat: null, lng: null, speed: null, heading: null, accuracy: null, recorded_at: null };
+      next.online = event.online ? 1 : 0;
+      state.drivers.set(Number(event.driver_id), next);
+      updateDriverListState();
+    }
+
+    function updateDriverFromListRow(row) {
+      if (!row) return;
+      const id = Number(row.id);
+      const existing = state.drivers.get(id) || { id, name: '', phone: '', online: 0, lat: null, lng: null, speed: null, heading: null, accuracy: null, recorded_at: null };
+      existing.name = row.name;
+      existing.phone = row.phone;
+      existing.online = row.online;
+      existing.lat = row.lat;
+      existing.lng = row.lng;
+      existing.speed = row.speed;
+      existing.heading = row.heading;
+      existing.accuracy = row.accuracy;
+      existing.recorded_at = row.recorded_at;
+      state.drivers.set(id, existing);
+      updateDriverListState();
+    }
+
+    async function fetchLatestDrivers() {
+      const key = getAdminKey();
+      if (!key) return;
+      const response = await fetch('/admin/drivers/latest', {
+        headers: { 'x-admin-key': key }
+      });
+
+      if (response.status === 401) {
+        logout();
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(`Failed to load drivers: ${response.status}`);
+      }
+
+      const rows = await response.json();
+      state.drivers.clear();
+      for (const row of rows) {
+        updateDriverFromListRow(row);
+      }
+      updateDriverListState();
+      state.lastRefreshAt = Date.now();
+    }
+
+    function tryConnectWebSocket() {
+      const key = getAdminKey();
+      if (!key) return;
+
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+      const wsUrl = `${protocol}://${location.host}/ws?key=${encodeURIComponent(key)}`;
+      const socket = new WebSocket(wsUrl);
+      state.ws = socket;
+
+      socket.addEventListener('open', () => {
+        setLiveStatus('Live', true);
+        fetchLatestDrivers().catch(() => setLiveStatus('Reconnecting', false));
+      });
+
+      socket.addEventListener('message', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'location') {
+            handleLocationEvent(data);
+          } else if (data.type === 'status') {
+            handleStatusEvent(data);
+          }
+        } catch (err) {
+          console.error('WS message parse error', err);
+        }
+      });
+
+      socket.addEventListener('close', () => {
+        setLiveStatus('Reconnecting', false);
+        if (state.ws === socket) {
+          state.ws = null;
+        }
+        if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = setTimeout(() => {
+          tryConnectWebSocket();
+          fetchLatestDrivers().catch(() => {});
+        }, 3000);
+      });
+
+      socket.addEventListener('error', () => {
+        socket.close();
+      });
+    }
+
+    function showLogin() {
+      elements.loginOverlay.style.display = 'flex';
+      elements.adminKeyInput.value = '';
+      elements.loginError.textContent = '';
+      elements.adminKeyInput.focus();
+    }
+
+    function hideLogin() {
+      elements.loginOverlay.style.display = 'none';
+    }
+
+    async function login() {
+      const key = elements.adminKeyInput.value.trim();
+      if (!key) {
+        elements.loginError.textContent = 'Admin key is required.';
+        return;
+      }
+
+      try {
+        const response = await fetch('/admin/drivers/latest', {
+          headers: { 'x-admin-key': key }
+        });
+
+        if (response.status === 401) {
+          elements.loginError.textContent = 'Invalid admin key.';
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error('Unable to reach backend');
+        }
+
+        setAdminKey(key);
+        elements.loginError.textContent = '';
+        hideLogin();
+        await fetchLatestDrivers();
+        tryConnectWebSocket();
+      } catch (err) {
+        console.error(err);
+        elements.loginError.textContent = 'Unable to connect to the server.';
+      }
+    }
+
+    function logout() {
+      setAdminKey('');
+      if (state.ws) {
+        state.ws.close();
+        state.ws = null;
+      }
+      if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = null;
+      }
+      state.drivers.clear();
+      updateDriverListState();
+      showLogin();
+    }
+
+    function startStatusTimer() {
+      setInterval(() => {
+        renderCounters();
+        renderList();
+      }, 5000);
+    }
+
+    function init() {
+      const key = getAdminKey();
+      if (key) {
+        hideLogin();
+        fetchLatestDrivers().catch(() => {
+          showLogin();
+          elements.loginError.textContent = 'Unable to load drivers.';
+        });
+        tryConnectWebSocket();
+      } else {
+        showLogin();
+      }
+
+      elements.loginBtn.addEventListener('click', login);
+      elements.logoutBtn.addEventListener('click', logout);
+      elements.collapseBtn.addEventListener('click', () => {
+        elements.sidebar.classList.toggle('collapsed');
+      });
+      elements.searchInput.addEventListener('input', (event) => {
+        state.search = event.target.value.trim();
+        renderList();
+      });
+      elements.fitBtn.addEventListener('click', () => {
+        maybeFitMap();
+      });
+      elements.adminKeyInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          login();
+        }
+      });
+
+      document.getElementById('sidebar').addEventListener('click', (event) => {
+        if (event.target.closest('button')) return;
+      });
+
+      startStatusTimer();
+    }
+
+    init();
+  </script>
+</body>
+</html>
