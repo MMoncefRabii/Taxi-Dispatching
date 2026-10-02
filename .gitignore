@@ -19,9 +19,11 @@ coverage/
 DriverApp/android/.gradle/
 DriverApp/android/app/build/
 DriverApp/android/build/
+DriverApp/android/app/debug.keystore
 DriverApp/ios/Pods/
 DriverApp/ios/build/
 DriverApp/ios/DerivedData/
+DriverApp/.bundle/
 DriverApp/.metro-health-check*
 
 # Logs and operating-system files

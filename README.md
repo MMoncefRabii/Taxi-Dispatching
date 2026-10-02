@@ -68,6 +68,8 @@ The browser dashboard is served from `backend/static/` at `/`. It uses Leaflet a
 ├── DriverApp/               React Native driver app, Android/iOS projects, and technical decisions
 │   └── docs/
 │       └── TECHNICAL_DECISIONS.md
+├── docs/                    Repository-level contribution and branch documentation
+│   └── GIT_BRANCH_MAP.md
 └── README.md                Project overview and local setup
 ```
 
@@ -135,3 +137,4 @@ Upcoming phases include deployment foundations (containerization, CI/CD, and Kub
 Work-in-progress portfolio/client project. No license has been specified.
 
 Technical decisions are documented in [DriverApp/docs/TECHNICAL_DECISIONS.md](DriverApp/docs/TECHNICAL_DECISIONS.md).
+Current branch and remote relationships are recorded in [docs/GIT_BRANCH_MAP.md](docs/GIT_BRANCH_MAP.md).
