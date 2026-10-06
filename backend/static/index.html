@@ -366,6 +366,82 @@
       cursor: pointer;
     }
 
+    .dialog-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(10, 18, 28, 0.48);
+      backdrop-filter: blur(4px);
+    }
+
+    .dialog-overlay[hidden] { display: none; }
+
+    .dialog-box {
+      width: min(440px, calc(100vw - 32px));
+      max-height: calc(100vh - 32px);
+      overflow: auto;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 22px 20px 18px;
+    }
+
+    .dialog-box h2 {
+      margin: 0 0 14px;
+      font-size: 1.4rem;
+    }
+
+    .dialog-box label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    .dialog-box input {
+      width: 100%;
+      font-size: 1rem;
+      padding: 11px 12px;
+      margin-bottom: 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel-strong);
+      color: var(--text);
+    }
+
+    .dialog-box .error {
+      color: var(--danger);
+      min-height: 20px;
+      margin-bottom: 10px;
+      font-size: 0.9rem;
+    }
+
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .token-value {
+      display: block;
+      overflow-wrap: anywhere;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel-strong);
+      user-select: all;
+    }
+
+    .token-warning {
+      color: var(--danger);
+      font-weight: 700;
+    }
+
     .leaflet-popup-content-wrapper,
     .leaflet-popup-tip {
       background: var(--card-bg);
@@ -510,10 +586,40 @@
         <div class="search-wrap">
           <input id="searchInput" type="text" placeholder="Search driver" aria-label="Search driver" />
         </div>
+        <button id="newDriverBtn" class="btn" type="button">New driver</button>
         <button id="fitBtn" class="btn" type="button">Fit all</button>
       </div>
       <div id="driverList" class="list"></div>
     </aside>
+
+    <div id="newDriverOverlay" class="dialog-overlay" hidden>
+      <form id="newDriverForm" class="dialog-box" role="dialog" aria-modal="true" aria-labelledby="newDriverTitle">
+        <h2 id="newDriverTitle">New driver</h2>
+        <label for="newDriverName">Name</label>
+        <input id="newDriverName" name="name" type="text" minlength="1" maxlength="100" required />
+        <label for="newDriverPhone">Phone</label>
+        <input id="newDriverPhone" name="phone" type="tel" minlength="5" maxlength="20" required />
+        <div id="newDriverError" class="error" role="alert" aria-live="polite"></div>
+        <div class="dialog-actions">
+          <button id="cancelNewDriverBtn" class="btn secondary" type="button">Cancel</button>
+          <button id="submitNewDriverBtn" class="btn" type="submit">Create driver</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="driverTokenOverlay" class="dialog-overlay" hidden>
+      <div class="dialog-box" role="dialog" aria-modal="true" aria-labelledby="createdDriverName">
+        <h2 id="createdDriverName"></h2>
+        <p class="token-warning">This token is shown only once. Give it to the driver now.</p>
+        <code id="createdDriverToken" class="token-value"></code>
+        <div id="copyTokenStatus" class="error" role="status" aria-live="polite"></div>
+        <div id="listRefreshError" class="error" role="status" aria-live="polite"></div>
+        <div class="dialog-actions">
+          <button id="copyTokenBtn" class="btn secondary" type="button">Copy</button>
+          <button id="closeTokenDialogBtn" class="btn" type="button">Close</button>
+        </div>
+      </div>
+    </div>
 
     <div id="loginOverlay" class="login-overlay">
       <div class="login-box">
@@ -572,18 +678,25 @@
       liveDot: document.getElementById('live-dot'),
       devModeBanner: document.getElementById('devModeBanner'),
       sidebar: document.getElementById('sidebar'),
-      collapseBtn: document.getElementById('collapseBtn')
+      collapseBtn: document.getElementById('collapseBtn'),
+      newDriverBtn: document.getElementById('newDriverBtn'),
+      newDriverOverlay: document.getElementById('newDriverOverlay'),
+      newDriverForm: document.getElementById('newDriverForm'),
+      newDriverName: document.getElementById('newDriverName'),
+      newDriverPhone: document.getElementById('newDriverPhone'),
+      newDriverError: document.getElementById('newDriverError'),
+      cancelNewDriverBtn: document.getElementById('cancelNewDriverBtn'),
+      submitNewDriverBtn: document.getElementById('submitNewDriverBtn'),
+      driverTokenOverlay: document.getElementById('driverTokenOverlay'),
+      createdDriverName: document.getElementById('createdDriverName'),
+      createdDriverToken: document.getElementById('createdDriverToken'),
+      copyTokenBtn: document.getElementById('copyTokenBtn'),
+      closeTokenDialogBtn: document.getElementById('closeTokenDialogBtn'),
+      copyTokenStatus: document.getElementById('copyTokenStatus'),
+      listRefreshError: document.getElementById('listRefreshError')
     };
 
-    function escapeHtml(value) {
-      const text = String(value ?? '');
-      return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-    }
+    let oneTimeToken = '';
 
     function getAdminKey() {
       return sessionStorage.getItem(ADMIN_KEY_STORAGE_KEY) || '';
@@ -666,14 +779,15 @@
       const needle = document.createElement('span');
       needle.textContent = '→';
       needle.style.display = 'block';
-      needle.style.transform = `rotate(${Number(driver.heading || 0)}deg)`;
+      const heading = Number(driver.heading);
+      needle.style.transform = `rotate(${Number.isFinite(heading) ? heading : 0}deg)`;
       needle.style.transition = 'transform 0.25s ease';
       needle.style.pointerEvents = 'none';
       arrow.appendChild(needle);
 
       return L.divIcon({
         className: 'custom-driver-icon',
-        html: arrow.outerHTML,
+        html: arrow,
         iconSize: [18, 18],
         iconAnchor: [9, 9],
         popupAnchor: [0, -14]
@@ -713,16 +827,46 @@
     function openDriverCard(driver) {
       const status = getDriverStatus(driver);
       const statusClass = status === STATUS.ONLINE ? 'online' : status === STATUS.STALE ? 'stale' : 'offline';
-      const phoneLink = `<a href="tel:${escapeHtml(driver.phone || '')}">${escapeHtml(driver.phone || '—')}</a>`;
-      const content = `
-        <div class="driver-card">
-          <h3>${escapeHtml(driver.name || 'Unknown driver')}</h3>
-          <div class="status-chip ${statusClass}">${status}</div>
-          <div class="row"><span>Phone</span><span>${phoneLink}</span></div>
-          <div class="row"><span>Speed</span><span>${escapeHtml(formatSpeedKmh(driver.speed))}</span></div>
-          <div class="row"><span>Last seen</span><span>${escapeHtml(formatLastSeen(driver))}</span></div>
-        </div>
-      `;
+      const content = document.createElement('div');
+      content.className = 'driver-card';
+      const name = document.createElement('h3');
+      name.textContent = String(driver.name || 'Unknown driver');
+      content.appendChild(name);
+
+      const statusChip = document.createElement('div');
+      statusChip.className = `status-chip ${statusClass}`;
+      statusChip.textContent = status;
+      content.appendChild(statusChip);
+
+      const phoneRow = document.createElement('div');
+      phoneRow.className = 'row';
+      const phoneLabel = document.createElement('span');
+      phoneLabel.textContent = 'Phone';
+      const phoneLink = document.createElement('a');
+      const phone = String(driver.phone || '');
+      phoneLink.href = `tel:${encodeURIComponent(phone)}`;
+      phoneLink.textContent = phone || '—';
+      phoneRow.append(phoneLabel, phoneLink);
+      content.appendChild(phoneRow);
+
+      const speedRow = document.createElement('div');
+      speedRow.className = 'row';
+      const speedLabel = document.createElement('span');
+      speedLabel.textContent = 'Speed';
+      const speedValue = document.createElement('span');
+      speedValue.textContent = formatSpeedKmh(driver.speed);
+      speedRow.append(speedLabel, speedValue);
+      content.appendChild(speedRow);
+
+      const lastSeenRow = document.createElement('div');
+      lastSeenRow.className = 'row';
+      const lastSeenLabel = document.createElement('span');
+      lastSeenLabel.textContent = 'Last seen';
+      const lastSeenValue = document.createElement('span');
+      lastSeenValue.textContent = formatLastSeen(driver);
+      lastSeenRow.append(lastSeenLabel, lastSeenValue);
+      content.appendChild(lastSeenRow);
+
       const marker = driverMap.get(String(driver.id));
       if (marker) {
         marker.bindPopup(content).openPopup();
@@ -756,39 +900,48 @@
       });
 
       if (!rows.length) {
-        elements.driverList.innerHTML = '<div style="padding:12px;color:var(--muted);">No drivers found.</div>';
+        const emptyMessage = document.createElement('div');
+        emptyMessage.style.padding = '12px';
+        emptyMessage.style.color = 'var(--muted)';
+        emptyMessage.textContent = 'No drivers found.';
+        elements.driverList.replaceChildren(emptyMessage);
         return;
       }
 
-      const html = rows.map((driver) => {
+      const items = rows.map((driver) => {
         const status = getDriverStatus(driver);
         const statusColor = getStatusColor(driver);
         const isActive = String(state.selectedDriverId) === String(driver.id);
-        const name = escapeHtml(driver.name || 'Unknown driver');
-        const phone = escapeHtml(driver.phone || '—');
-        const speedText = escapeHtml(formatSpeedKmh(driver.speed));
-        const lastSeen = escapeHtml(formatLastSeen(driver));
+        const row = document.createElement('button');
+        row.className = `driver-item${isActive ? ' active' : ''}`;
+        row.dataset.id = String(driver.id);
+        row.type = 'button';
 
-        return `
-          <button class="driver-item ${isActive ? 'active' : ''}" data-id="${escapeHtml(driver.id)}" type="button">
-            <span class="driver-dot" style="background:${statusColor};"></span>
-            <span class="driver-main">
-              <span class="driver-name">${name}</span>
-              <span class="driver-meta">
-                <span>${phone}</span>
-                <span>${status}</span>
-              </span>
-            </span>
-            <span class="driver-speed">${speedText}<br>${lastSeen}</span>
-          </button>
-        `;
-      }).join('');
+        const dot = document.createElement('span');
+        dot.className = 'driver-dot';
+        dot.style.background = statusColor;
+        const main = document.createElement('span');
+        main.className = 'driver-main';
+        const name = document.createElement('span');
+        name.className = 'driver-name';
+        name.textContent = String(driver.name || 'Unknown driver');
+        const meta = document.createElement('span');
+        meta.className = 'driver-meta';
+        const phone = document.createElement('span');
+        phone.textContent = String(driver.phone || '—');
+        const statusText = document.createElement('span');
+        statusText.textContent = status;
+        meta.append(phone, statusText);
+        main.append(name, meta);
 
-      elements.driverList.innerHTML = html;
-
-      elements.driverList.querySelectorAll('.driver-item').forEach((row) => {
+        const speed = document.createElement('span');
+        speed.className = 'driver-speed';
+        speed.append(document.createTextNode(formatSpeedKmh(driver.speed)));
+        speed.append(document.createElement('br'));
+        speed.append(document.createTextNode(formatLastSeen(driver)));
+        row.append(dot, main, speed);
         row.addEventListener('click', () => {
-          const id = String(row.dataset.id);
+          const id = row.dataset.id;
           const driver = state.drivers.get(id);
           state.selectedDriverId = id;
           renderList();
@@ -796,7 +949,9 @@
             openDriverCard(driver);
           }
         });
+        return row;
       });
+      elements.driverList.replaceChildren(...items);
     }
 
     function updateDriverListState() {
@@ -952,6 +1107,90 @@
       elements.loginOverlay.style.display = 'none';
     }
 
+    function showNewDriverDialog() {
+      elements.newDriverError.textContent = '';
+      elements.newDriverOverlay.hidden = false;
+      elements.newDriverName.focus();
+    }
+
+    function closeNewDriverDialog() {
+      elements.newDriverOverlay.hidden = true;
+      elements.newDriverForm.reset();
+      elements.newDriverError.textContent = '';
+      elements.newDriverBtn.focus();
+    }
+
+    function closeTokenDialog() {
+      oneTimeToken = '';
+      elements.createdDriverToken.textContent = '';
+      elements.createdDriverName.textContent = '';
+      elements.copyTokenStatus.textContent = '';
+      elements.listRefreshError.textContent = '';
+      elements.driverTokenOverlay.hidden = true;
+      elements.newDriverBtn.focus();
+    }
+
+    async function createDriver(event) {
+      event.preventDefault();
+      if (!elements.newDriverForm.reportValidity()) return;
+
+      elements.newDriverError.textContent = '';
+      elements.submitNewDriverBtn.disabled = true;
+      const name = elements.newDriverName.value;
+      const phone = elements.newDriverPhone.value;
+      const headers = { 'Content-Type': 'application/json' };
+      if (!state.devMode) {
+        headers['x-admin-key'] = getAdminKey();
+      }
+
+      try {
+        const response = await fetch('/admin/drivers', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ name, phone })
+        });
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            logout();
+            elements.newDriverError.textContent = 'Your admin session is no longer valid. Log in again.';
+          } else if (response.status === 422) {
+            elements.newDriverError.textContent = 'Check the name and phone fields and try again.';
+          } else {
+            elements.newDriverError.textContent = 'Unable to create the driver. Please try again.';
+          }
+          return;
+        }
+
+        const result = await response.json();
+        if (!result || typeof result.token !== 'string' || !result.token) {
+          elements.newDriverError.textContent = 'The driver was created, but no token was returned. Contact support.';
+          return;
+        }
+
+        oneTimeToken = result.token;
+        result.token = '';
+        elements.createdDriverName.textContent = String(result.name || name);
+        elements.createdDriverToken.textContent = oneTimeToken;
+        elements.copyTokenStatus.textContent = '';
+        elements.listRefreshError.textContent = '';
+        elements.newDriverOverlay.hidden = true;
+        elements.newDriverForm.reset();
+        elements.driverTokenOverlay.hidden = false;
+
+        try {
+          await fetchLatestDrivers();
+        } catch {
+          elements.listRefreshError.textContent =
+            'Driver created, but the list could not be refreshed. Refresh the page to see the new driver.';
+        }
+      } catch {
+        elements.newDriverError.textContent = 'Unable to create the driver. Check your connection and try again.';
+      } finally {
+        elements.submitNewDriverBtn.disabled = false;
+      }
+    }
+
     async function login() {
       const key = elements.adminKeyInput.value.trim();
       if (!key) {
@@ -1051,6 +1290,32 @@
     function init() {
       elements.loginBtn.addEventListener('click', login);
       elements.logoutBtn.addEventListener('click', logout);
+      elements.newDriverBtn.addEventListener('click', showNewDriverDialog);
+      elements.cancelNewDriverBtn.addEventListener('click', closeNewDriverDialog);
+      elements.newDriverForm.addEventListener('submit', createDriver);
+      elements.newDriverOverlay.addEventListener('click', (event) => {
+        if (event.target === elements.newDriverOverlay) closeNewDriverDialog();
+      });
+      elements.driverTokenOverlay.addEventListener('click', (event) => {
+        if (event.target === elements.driverTokenOverlay) closeTokenDialog();
+      });
+      elements.closeTokenDialogBtn.addEventListener('click', closeTokenDialog);
+      elements.copyTokenBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(oneTimeToken);
+          elements.copyTokenStatus.textContent = 'Token copied.';
+        } catch {
+          elements.copyTokenStatus.textContent = 'Could not copy. Select the token and copy it manually.';
+        }
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        if (!elements.driverTokenOverlay.hidden) {
+          closeTokenDialog();
+        } else if (!elements.newDriverOverlay.hidden) {
+          closeNewDriverDialog();
+        }
+      });
       elements.collapseBtn.addEventListener('click', () => {
         elements.sidebar.classList.toggle('collapsed');
       });
