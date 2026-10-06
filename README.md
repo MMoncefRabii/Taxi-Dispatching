@@ -36,7 +36,7 @@ The interactive API documentation is available at `/docs` when the backend is ru
 
 ### Admin Dashboard
 
-The browser dashboard is served from `backend/static/` at `/`. It uses Leaflet and OpenStreetMap tiles to show drivers with known coordinates, a driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. The dashboard receives WebSocket updates and refreshes the driver list periodically. Dashboard access uses the shared admin key.
+The browser dashboard is served from `backend/static/` at `/`. It uses Leaflet and OpenStreetMap tiles to show drivers with known coordinates, a driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. Admins can create drivers from the dashboard; the new driver's token is shown once and must be given to the driver then. The dashboard receives WebSocket updates and refreshes the driver list periodically. Dashboard access uses the shared admin key.
 
 ### Driver App
 

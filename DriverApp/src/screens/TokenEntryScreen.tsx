@@ -2,7 +2,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Keyboard,
   StyleSheet,
   Text,
@@ -11,42 +10,28 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { createDriverToken } from '../api/client';
 
 interface Props {
   onTokenSaved: (token: string) => void;
 }
 
 export function TokenEntryScreen({ onTokenSaved }: Props) {
-  const [adminKey, setAdminKey] = useState('');
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [token, setToken] = useState('');
   const [saving, setSaving] = useState(false);
 
   const saveToken = async () => {
-    const normalizedAdminKey = adminKey.trim();
-    const normalizedName = name.trim();
-    const normalizedPhone = phone.trim();
-    if (!normalizedAdminKey || !normalizedName || !normalizedPhone || saving) {
+    const normalizedToken = token.trim();
+    if (!normalizedToken || saving) {
       return;
     }
 
     setSaving(true);
     try {
-      const token = await createDriverToken({
-        adminKey: normalizedAdminKey,
-        name: normalizedName,
-        phone: normalizedPhone,
-      });
-      await AsyncStorage.setItem('driver_token', token);
+      await AsyncStorage.setItem('driver_token', normalizedToken);
       Keyboard.dismiss();
-      onTokenSaved(token);
+      onTokenSaved(normalizedToken);
     } catch (error) {
-      console.warn('Unable to create driver token:', error);
-      Alert.alert(
-        'Unable to get driver token',
-        error instanceof Error ? error.message : 'Please try again.',
-      );
+      console.warn('Unable to save driver token:', error);
     } finally {
       setSaving(false);
     }
@@ -59,59 +44,34 @@ export function TokenEntryScreen({ onTokenSaved }: Props) {
           <Text style={styles.markText}>D</Text>
         </View>
         <Text style={styles.eyebrow}>TEMPORARY DRIVER ACCESS</Text>
-        <Text style={styles.title}>Request a driver token</Text>
+        <Text style={styles.title}>Enter your driver token</Text>
         <Text style={styles.description}>
-          The admin dashboard creates the driver account. This mobile flow receives the
-          one-time token returned by the existing admin endpoint.
+          Paste the driver token provided by your admin.
         </Text>
         <TextInput
-          accessibilityLabel="Admin key"
+          accessibilityLabel="Driver token"
           autoCapitalize="none"
           autoCorrect={false}
           secureTextEntry
-          onChangeText={setAdminKey}
-          placeholder="Admin key"
-          placeholderTextColor="#7c8581"
-          returnKeyType="next"
-          style={styles.input}
-          value={adminKey}
-        />
-        <TextInput
-          accessibilityLabel="Driver name"
-          autoCapitalize="words"
-          autoCorrect={false}
-          onChangeText={setName}
-          placeholder="Driver name"
-          placeholderTextColor="#7c8581"
-          returnKeyType="next"
-          style={styles.input}
-          value={name}
-        />
-        <TextInput
-          accessibilityLabel="Driver phone"
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="phone-pad"
-          onChangeText={setPhone}
-          placeholder="Driver phone"
+          onChangeText={setToken}
+          placeholder="Driver token"
           placeholderTextColor="#7c8581"
           returnKeyType="done"
           style={styles.input}
-          value={phone}
+          value={token}
         />
         <TouchableOpacity
           accessibilityRole="button"
-          disabled={!adminKey.trim() || !name.trim() || !phone.trim() || saving}
+          disabled={!token.trim() || saving}
           onPress={saveToken}
           style={[
             styles.button,
-            (!adminKey.trim() || !name.trim() || !phone.trim() || saving) &&
-              styles.disabled,
+            (!token.trim() || saving) && styles.disabled,
           ]}>
           {saving ? (
             <ActivityIndicator color="#ffffff" />
           ) : (
-            <Text style={styles.buttonText}>Request token</Text>
+            <Text style={styles.buttonText}>Save token</Text>
           )}
         </TouchableOpacity>
       </View>

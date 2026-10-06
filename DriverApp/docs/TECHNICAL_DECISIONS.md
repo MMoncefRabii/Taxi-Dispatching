@@ -25,7 +25,7 @@
 - Why: It is a standard React Native navigation option with TypeScript support and a minimal setup for the app's token-gated three-screen flow.
 
 ## Unauthorized response handling
-- What we chose: The API client invokes a single unauthorized handler on HTTP 401, and the app registers that handler at the root to remove the saved token, show a session-expired alert, and return navigation to token entry.
+- What we chose: The API client invokes a single unauthorized handler on HTTP 401, and the app registers that handler at the root to remove the saved token, show an invalid-driver-token alert, and return navigation to token entry.
 - Why: Centralizing this behavior means each endpoint caller gets consistent invalid-token handling without duplicating logout logic.
 
 ## Location delivery and failures
