@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import logging
 import secrets
 import time
 import uuid
@@ -24,6 +25,17 @@ DEFAULT_CENTER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 MAX_ACCURACY_M = 50
 
 
+def admin_auth_disabled() -> bool:
+    # TODO: Remove this helper and setting, then restore unconditional admin checks for HTTP and WebSocket.
+    if not settings.dev_disable_admin_auth:
+        return False
+    if settings.app_env == "production":
+        raise RuntimeError(
+            "DEV_DISABLE_ADMIN_AUTH cannot be enabled when APP_ENV=production"
+        )
+    return True
+
+
 def _normalize_recorded_at(value: float | None) -> float:
     now = time.time()
     if value is None or value > now + 60 or value < now - 86400:
@@ -37,6 +49,8 @@ def _as_utc_datetime(timestamp: float) -> datetime:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if admin_auth_disabled():
+        logging.getLogger(__name__).warning("ADMIN AUTH DISABLED (DEV MODE)")
     yield
     await engine.dispose()
 
@@ -108,7 +122,8 @@ async def create_driver(
     x_admin_key: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    require_admin(x_admin_key)
+    if not admin_auth_disabled():
+        require_admin(x_admin_key)
     token = secrets.token_urlsafe(24)
     driver = Driver(
         center_id=DEFAULT_CENTER_ID,
@@ -126,7 +141,8 @@ async def latest_positions(
     x_admin_key: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    require_admin(x_admin_key)
+    if not admin_auth_disabled():
+        require_admin(x_admin_key)
     ranked_locations = (
         select(
             DriverLocation.driver_id.label("driver_id"),
@@ -249,11 +265,12 @@ async def post_location(
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket, key: str = Query(default="")):
-    expected = settings.admin_key.encode("utf-8", "surrogateescape")
-    provided = key.encode("utf-8", "surrogateescape")
-    if not secrets.compare_digest(provided, expected):
-        await ws.close(code=1008)
-        return
+    if not admin_auth_disabled():
+        expected = settings.admin_key.encode("utf-8", "surrogateescape")
+        provided = key.encode("utf-8", "surrogateescape")
+        if not secrets.compare_digest(provided, expected):
+            await ws.close(code=1008)
+            return
 
     await ws.accept()
     clients.add(ws)

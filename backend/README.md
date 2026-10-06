@@ -12,6 +12,10 @@ This setup is for local development only. Do not use the development database pa
 
 The `%20` in the URL encodes the leading space in the password. Set `POSTGRES_PASSWORD` as well as `DATABASE_URL`: Compose uses the former when initializing PostgreSQL, while the backend uses the latter to connect.
 
+## Admin authentication settings
+
+`APP_ENV` accepts `development` or `production`; it defaults to `production` when unset or invalid. Admin key authentication remains enabled by default. For local dashboard testing only, set `APP_ENV=development` and `DEV_DISABLE_ADMIN_AUTH=true`. The backend logs a warning when this is enabled and refuses to start if it is enabled in production. Never enable this switch in a shared or production environment.
+
 ## Start the backend on Windows PowerShell
 
 From the repository root:

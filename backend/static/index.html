@@ -428,6 +428,23 @@
     }
 
     .live-dot.live { background: var(--online); }
+
+    .dev-mode-banner {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      z-index: 800;
+      display: none;
+      transform: translateX(-50%);
+      border-radius: 999px;
+      padding: 9px 14px;
+      background: #8a2f20;
+      color: #ffffff;
+      font-size: 0.85rem;
+      font-weight: 700;
+      box-shadow: var(--shadow);
+      white-space: nowrap;
+    }
     .live-dot.reconnect { background: var(--stale); }
 
     @media (max-width: 720px) {
@@ -477,6 +494,10 @@
       </div>
     </div>
 
+    <div id="devModeBanner" class="dev-mode-banner" role="status" aria-live="polite">
+      DEV MODE - admin auth disabled
+    </div>
+
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-header">
         <strong>Drivers</strong>
@@ -522,7 +543,8 @@
       reconnectTimer: null,
       liveStatus: 'reconnecting',
       search: '',
-      lastRefreshAt: 0
+      lastRefreshAt: 0,
+      devMode: false
     };
 
     const map = L.map('map', { zoomControl: true }).setView(TUNIS_CENTER, 11);
@@ -548,6 +570,7 @@
       counterOffline: document.getElementById('counter-offline'),
       liveText: document.getElementById('live-text'),
       liveDot: document.getElementById('live-dot'),
+      devModeBanner: document.getElementById('devModeBanner'),
       sidebar: document.getElementById('sidebar'),
       collapseBtn: document.getElementById('collapseBtn')
     };
@@ -850,10 +873,9 @@
 
     async function fetchLatestDrivers() {
       const key = getAdminKey();
-      if (!key) return;
-      const response = await fetch('/admin/drivers/latest', {
-        headers: { 'x-admin-key': key }
-      });
+      if (!state.devMode && !key) return;
+      const options = state.devMode ? {} : { headers: { 'x-admin-key': key } };
+      const response = await fetch('/admin/drivers/latest', options);
 
       if (response.status === 401) {
         logout();
@@ -875,10 +897,12 @@
 
     function tryConnectWebSocket() {
       const key = getAdminKey();
-      if (!key) return;
+      if (!state.devMode && !key) return;
 
       const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-      const wsUrl = `${protocol}://${location.host}/ws?key=${encodeURIComponent(key)}`;
+      const wsUrl = state.devMode
+        ? `${protocol}://${location.host}/ws`
+        : `${protocol}://${location.host}/ws?key=${encodeURIComponent(key)}`;
       const socket = new WebSocket(wsUrl);
       state.ws = socket;
 
@@ -982,7 +1006,7 @@
       }, 5000);
     }
 
-    function init() {
+    function initializeWithAdminKey() {
       const key = getAdminKey();
       if (key) {
         hideLogin();
@@ -994,7 +1018,37 @@
       } else {
         showLogin();
       }
+    }
 
+    async function probeDevMode() {
+      try {
+        const response = await fetch('/admin/drivers/latest');
+        if (response.status === 200) {
+          state.devMode = true;
+          elements.devModeBanner.style.display = 'block';
+          hideLogin();
+          const rows = await response.json();
+          state.drivers.clear();
+          for (const row of rows) {
+            updateDriverFromListRow(row);
+          }
+          updateDriverListState();
+          state.lastRefreshAt = Date.now();
+          tryConnectWebSocket();
+          return;
+        }
+        if (response.status === 401) {
+          initializeWithAdminKey();
+          return;
+        }
+        throw new Error(`Unable to probe admin access: ${response.status}`);
+      } catch (err) {
+        console.error(err);
+        initializeWithAdminKey();
+      }
+    }
+
+    function init() {
       elements.loginBtn.addEventListener('click', login);
       elements.logoutBtn.addEventListener('click', logout);
       elements.collapseBtn.addEventListener('click', () => {
@@ -1018,6 +1072,7 @@
       });
 
       startStatusTimer();
+      probeDevMode();
     }
 
     init();
