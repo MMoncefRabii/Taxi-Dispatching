@@ -1,77 +1,50 @@
 import asyncio
-import os
+import hashlib
 import secrets
-import sqlite3
-import threading
 import time
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.db import engine, get_db
+from app.models import Driver, DriverLocation
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "tracking.db"
 STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
-
-ADMIN_KEY = os.getenv("ADMIN_KEY")
-if ADMIN_KEY is None or ADMIN_KEY == "":
-    raise RuntimeError("ADMIN_KEY environment variable is required")
-
+DEFAULT_CENTER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 MAX_ACCURACY_M = 50
-DB_LOCK = threading.Lock()
 
 
 def _normalize_recorded_at(value: float | None) -> float:
     now = time.time()
-    if value is None:
-        return now
-    if value > now + 60 or value < now - 86400:
+    if value is None or value > now + 60 or value < now - 86400:
         return now
     return value
 
 
-db = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
-db.row_factory = sqlite3.Row
-db.execute("PRAGMA journal_mode=WAL;")
-db.executescript(
-    """
-    CREATE TABLE IF NOT EXISTS drivers (
-        id INTEGER PRIMARY KEY,
-        name TEXT,
-        phone TEXT,
-        token TEXT UNIQUE,
-        online INTEGER DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS locations (
-        id INTEGER PRIMARY KEY,
-        driver_id INTEGER,
-        lat REAL,
-        lng REAL,
-        speed REAL,
-        heading REAL,
-        accuracy REAL,
-        recorded_at REAL
-    );
-    CREATE INDEX IF NOT EXISTS idx_loc ON locations(driver_id, recorded_at);
-    CREATE TABLE IF NOT EXISTS latest (
-        driver_id INTEGER PRIMARY KEY,
-        lat REAL,
-        lng REAL,
-        speed REAL,
-        heading REAL,
-        accuracy REAL,
-        recorded_at REAL
-    );
-    """
-)
+def _as_utc_datetime(timestamp: float) -> datetime:
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc)
 
-app = FastAPI(title="Fleet Tracker")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    yield
+    await engine.dispose()
+
+
+app = FastAPI(title="Fleet Tracker", lifespan=lifespan)
 clients: set[WebSocket] = set()
 
 
-# ---------- models ----------
 class NewDriver(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     phone: str = Field(..., min_length=5, max_length=20)
@@ -90,34 +63,37 @@ class Status(BaseModel):
     online: bool
 
 
-# ---------- helpers ----------
-def require_admin(key: str):
+def require_admin(key: str | None) -> None:
     if key is None:
         raise HTTPException(401, "Missing admin key")
-    expected = ADMIN_KEY.encode("utf-8", "surrogateescape")
-    supplied = (key or "").encode("utf-8", "surrogateescape")
+    expected = settings.admin_key.encode("utf-8", "surrogateescape")
+    supplied = key.encode("utf-8", "surrogateescape")
     if not secrets.compare_digest(supplied, expected):
         raise HTTPException(401, "Invalid admin key")
 
 
-def get_driver(token: str):
-    if token is None or token == "":
+async def get_driver(token: str | None, db: AsyncSession) -> Driver:
+    if not token:
         raise HTTPException(401, "Missing driver token")
-    with DB_LOCK:
-        row = db.execute(
-            "SELECT id, name FROM drivers WHERE token=?",
-            (token,),
-        ).fetchone()
-    if not row:
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    result = await db.execute(
+        select(Driver).where(
+            Driver.token_hash == token_hash,
+            Driver.center_id == DEFAULT_CENTER_ID,
+            Driver.active.is_(True),
+        )
+    )
+    driver = result.scalar_one_or_none()
+    if driver is None:
         raise HTTPException(401, "Invalid driver token")
-    return row
+    return driver
 
 
-async def broadcast(message: dict):
+async def broadcast(message: dict) -> None:
     if not clients:
         return
 
-    async def send_one(ws: WebSocket):
+    async def send_one(ws: WebSocket) -> None:
         try:
             await asyncio.wait_for(ws.send_json(message), timeout=2.0)
         except Exception:
@@ -126,125 +102,168 @@ async def broadcast(message: dict):
     await asyncio.gather(*(send_one(ws) for ws in list(clients)), return_exceptions=True)
 
 
-# ---------- admin ----------
 @app.post("/admin/drivers")
-def create_driver(body: NewDriver, x_admin_key: str = Header(None)):
+async def create_driver(
+    body: NewDriver,
+    x_admin_key: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+):
     require_admin(x_admin_key)
     token = secrets.token_urlsafe(24)
-    with DB_LOCK:
-        cur = db.execute(
-            "INSERT INTO drivers (name, phone, token) VALUES (?, ?, ?)",
-            (body.name, body.phone, token),
-        )
-        db.commit()
-    return {"id": cur.lastrowid, "name": body.name, "token": token}
+    driver = Driver(
+        center_id=DEFAULT_CENTER_ID,
+        name=body.name,
+        phone=body.phone,
+        token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+    )
+    db.add(driver)
+    await db.commit()
+    return {"id": str(driver.id), "name": body.name, "token": token}
 
 
 @app.get("/admin/drivers/latest")
-def latest_positions(x_admin_key: str = Header(None)):
+async def latest_positions(
+    x_admin_key: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+):
     require_admin(x_admin_key)
-    with DB_LOCK:
-        rows = db.execute(
-            """
-            SELECT d.id, d.name, d.phone, d.online,
-                   l.lat, l.lng, l.speed, l.heading, l.accuracy, l.recorded_at
-            FROM drivers d LEFT JOIN latest l ON l.driver_id = d.id
-            """
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-# ---------- driver ----------
-@app.post("/status")
-async def set_status(body: Status, x_token: str = Header(None)):
-    driver = get_driver(x_token)
-    with DB_LOCK:
-        db.execute(
-            "UPDATE drivers SET online=? WHERE id=?",
-            (int(body.online), driver["id"]),
+    ranked_locations = (
+        select(
+            DriverLocation.driver_id.label("driver_id"),
+            DriverLocation.lat.label("lat"),
+            DriverLocation.lng.label("lng"),
+            DriverLocation.speed.label("speed"),
+            DriverLocation.heading.label("heading"),
+            DriverLocation.accuracy.label("accuracy"),
+            DriverLocation.recorded_at.label("recorded_at"),
+            func.row_number()
+            .over(
+                partition_by=DriverLocation.driver_id,
+                order_by=(DriverLocation.recorded_at.desc(), DriverLocation.id.desc()),
+            )
+            .label("row_number"),
         )
-        db.commit()
-    await broadcast({"type": "status", "driver_id": driver["id"], "online": body.online})
+        .where(DriverLocation.center_id == DEFAULT_CENTER_ID)
+        .subquery()
+    )
+    rows = (
+        await db.execute(
+            select(
+                Driver,
+                ranked_locations.c.lat,
+                ranked_locations.c.lng,
+                ranked_locations.c.speed,
+                ranked_locations.c.heading,
+                ranked_locations.c.accuracy,
+                ranked_locations.c.recorded_at,
+            )
+            .outerjoin(
+                ranked_locations,
+                (ranked_locations.c.driver_id == Driver.id)
+                & (ranked_locations.c.row_number == 1),
+            )
+            .where(Driver.center_id == DEFAULT_CENTER_ID)
+        )
+    ).all()
+    return [
+        {
+            "id": str(driver.id),
+            "name": driver.name,
+            "phone": driver.phone,
+            "online": int(driver.online),
+            "lat": lat,
+            "lng": lng,
+            "speed": speed,
+            "heading": heading,
+            "accuracy": accuracy,
+            "recorded_at": recorded_at.timestamp()
+            if recorded_at is not None
+            else None,
+        }
+        for driver, lat, lng, speed, heading, accuracy, recorded_at in rows
+    ]
+
+
+@app.post("/status")
+async def set_status(
+    body: Status,
+    x_token: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    driver = await get_driver(x_token, db)
+    driver.online = body.online
+    await db.commit()
+    await broadcast({"type": "status", "driver_id": str(driver.id), "online": body.online})
     return {"ok": True}
 
 
 @app.post("/location")
-async def post_location(loc: Loc, x_token: str = Header(None)):
-    driver = get_driver(x_token)
+async def post_location(
+    loc: Loc,
+    x_token: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    driver = await get_driver(x_token, db)
     if loc.accuracy is not None and loc.accuracy > MAX_ACCURACY_M:
         return {"ok": False, "ignored": "low accuracy"}
 
-    ts = _normalize_recorded_at(loc.recorded_at)
-    values = (driver["id"], loc.lat, loc.lng, loc.speed, loc.heading, loc.accuracy, ts)
-
-    with DB_LOCK:
-        db.execute(
-            "INSERT INTO locations (driver_id, lat, lng, speed, heading, accuracy, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            values,
+    timestamp = _normalize_recorded_at(loc.recorded_at)
+    db.add(
+        DriverLocation(
+            center_id=DEFAULT_CENTER_ID,
+            driver_id=driver.id,
+            lat=loc.lat,
+            lng=loc.lng,
+            speed=loc.speed,
+            heading=loc.heading,
+            accuracy=loc.accuracy,
+            recorded_at=_as_utc_datetime(timestamp),
         )
-        db.execute(
-            """
-            INSERT INTO latest (driver_id, lat, lng, speed, heading, accuracy, recorded_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(driver_id)
-            DO UPDATE SET
-                lat = excluded.lat,
-                lng = excluded.lng,
-                speed = excluded.speed,
-                heading = excluded.heading,
-                accuracy = excluded.accuracy,
-                recorded_at = excluded.recorded_at
-            WHERE excluded.recorded_at > latest.recorded_at
-            """,
-            values,
-        )
-        online = db.execute("SELECT online FROM drivers WHERE id = ?", (driver["id"],)).fetchone()
-        if online and online["online"] == 0:
-            db.execute(
-                "UPDATE drivers SET online = 1 WHERE id = ?",
-                (driver["id"],),
-            )
-            broadcast_status = {"type": "status", "driver_id": driver["id"], "online": True}
-        else:
-            broadcast_status = None
-        db.commit()
+    )
+    broadcast_status = None
+    if not driver.online:
+        driver.online = True
+        broadcast_status = {
+            "type": "status",
+            "driver_id": str(driver.id),
+            "online": True,
+        }
+    await db.commit()
 
     if broadcast_status is not None:
         await broadcast(broadcast_status)
-
-    await broadcast({
-        "type": "location",
-        "driver_id": driver["id"],
-        "name": driver["name"],
-        "lat": loc.lat,
-        "lng": loc.lng,
-        "speed": loc.speed,
-        "heading": loc.heading,
-        "recorded_at": ts,
-    })
+    await broadcast(
+        {
+            "type": "location",
+            "driver_id": str(driver.id),
+            "name": driver.name,
+            "lat": loc.lat,
+            "lng": loc.lng,
+            "speed": loc.speed,
+            "heading": loc.heading,
+            "recorded_at": timestamp,
+        }
+    )
     return {"ok": True}
 
 
-# ---------- live feed for the dashboard ----------
 @app.websocket("/ws")
-async def ws_endpoint(ws: WebSocket, key: str = Query("")):
-    try:
-        expected = ADMIN_KEY.encode("utf-8", "surrogateescape")
-        provided = (key or "").encode("utf-8", "surrogateescape")
-        if not secrets.compare_digest(provided, expected):
-            await ws.close(code=1008)
-            return
+async def ws_endpoint(ws: WebSocket, key: str = Query(default="")):
+    expected = settings.admin_key.encode("utf-8", "surrogateescape")
+    provided = key.encode("utf-8", "surrogateescape")
+    if not secrets.compare_digest(provided, expected):
+        await ws.close(code=1008)
+        return
 
-        await ws.accept()
-        clients.add(ws)
-        try:
-            while True:
-                await ws.receive_text()
-        except WebSocketDisconnect:
-            pass
+    await ws.accept()
+    clients.add(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
     finally:
         clients.discard(ws)
 
 
-# dashboard (must stay last)
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

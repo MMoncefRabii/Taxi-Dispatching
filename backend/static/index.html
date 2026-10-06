@@ -658,7 +658,7 @@
     }
 
     function updateMarker(driver) {
-      const id = Number(driver.id);
+      const id = String(driver.id);
       const marker = driverMap.get(id);
       if (!driver || driver.lat == null || driver.lng == null) {
         if (marker) {
@@ -700,7 +700,7 @@
           <div class="row"><span>Last seen</span><span>${escapeHtml(formatLastSeen(driver))}</span></div>
         </div>
       `;
-      const marker = driverMap.get(Number(driver.id));
+      const marker = driverMap.get(String(driver.id));
       if (marker) {
         marker.bindPopup(content).openPopup();
       }
@@ -740,7 +740,7 @@
       const html = rows.map((driver) => {
         const status = getDriverStatus(driver);
         const statusColor = getStatusColor(driver);
-        const isActive = Number(state.selectedDriverId) === Number(driver.id);
+        const isActive = String(state.selectedDriverId) === String(driver.id);
         const name = escapeHtml(driver.name || 'Unknown driver');
         const phone = escapeHtml(driver.phone || '—');
         const speedText = escapeHtml(formatSpeedKmh(driver.speed));
@@ -765,7 +765,7 @@
 
       elements.driverList.querySelectorAll('.driver-item').forEach((row) => {
         row.addEventListener('click', () => {
-          const id = Number(row.dataset.id);
+          const id = String(row.dataset.id);
           const driver = state.drivers.get(id);
           state.selectedDriverId = id;
           renderList();
@@ -803,13 +803,14 @@
     }
 
     function setDriver(driver) {
-      state.drivers.set(Number(driver.id), driver);
+      state.drivers.set(String(driver.id), driver);
       updateDriverListState();
     }
 
     function handleLocationEvent(event) {
-      const driver = state.drivers.get(Number(event.driver_id));
-      const next = driver ? { ...driver } : { id: Number(event.driver_id), name: event.name || '', phone: '', online: 0, lat: null, lng: null, speed: null, heading: null, accuracy: null, recorded_at: null };
+      const driverId = String(event.driver_id);
+      const driver = state.drivers.get(driverId);
+      const next = driver ? { ...driver } : { id: driverId, name: event.name || '', phone: '', online: 0, lat: null, lng: null, speed: null, heading: null, accuracy: null, recorded_at: null };
       next.name = event.name || next.name || 'Unknown driver';
       next.lat = Number(event.lat);
       next.lng = Number(event.lng);
@@ -817,21 +818,22 @@
       next.heading = event.heading ?? next.heading ?? 0;
       next.recorded_at = Number(event.recorded_at);
       next.online = 1;
-      state.drivers.set(Number(event.driver_id), next);
+      state.drivers.set(driverId, next);
       updateDriverListState();
     }
 
     function handleStatusEvent(event) {
-      const driver = state.drivers.get(Number(event.driver_id));
-      const next = driver ? { ...driver } : { id: Number(event.driver_id), name: 'Unknown driver', phone: '', online: 0, lat: null, lng: null, speed: null, heading: null, accuracy: null, recorded_at: null };
+      const driverId = String(event.driver_id);
+      const driver = state.drivers.get(driverId);
+      const next = driver ? { ...driver } : { id: driverId, name: 'Unknown driver', phone: '', online: 0, lat: null, lng: null, speed: null, heading: null, accuracy: null, recorded_at: null };
       next.online = event.online ? 1 : 0;
-      state.drivers.set(Number(event.driver_id), next);
+      state.drivers.set(driverId, next);
       updateDriverListState();
     }
 
     function updateDriverFromListRow(row) {
       if (!row) return;
-      const id = Number(row.id);
+      const id = String(row.id);
       const existing = state.drivers.get(id) || { id, name: '', phone: '', online: 0, lat: null, lng: null, speed: null, heading: null, accuracy: null, recorded_at: null };
       existing.name = row.name;
       existing.phone = row.phone;

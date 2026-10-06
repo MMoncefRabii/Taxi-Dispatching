@@ -6,7 +6,7 @@ Fleet Tracker is a real-time GPS tracking system for taxi drivers and fleet oper
 
 ```text
 +-------------------+       HTTP/JSON         +------------------+       persist/query       +-------------+
-| Driver mobile app | ----------------------> | FastAPI backend  | ----------------------> |   SQLite    |
+| Driver mobile app | ----------------------> | FastAPI backend  | ----------------------> | PostgreSQL  |
 | React Native      |                         |                  |                          +-------------+
 +-------------------+                         |                  |
                                               | WebSocket events |-------------------------------+
@@ -49,13 +49,13 @@ The browser dashboard is served from `backend/static/` at `/`. It uses Leaflet a
 - No background location tracking; the driver app must remain foregrounded.
 - No individual admin accounts or roles; the dashboard and admin API use one shared admin key.
 - No dispatching, order assignment, or ERP workflows.
-- SQLite is used for persistence; production PostgreSQL is not configured.
+- PostgreSQL is used for persistence; the included Compose service is for local development only.
 - The project is not containerized and has no CI/CD pipeline or cloud deployment.
 - Automated backend/API/location-flow tests are not present. The mobile app currently has only a basic Jest render smoke test.
 
 ## Tech Stack
 
-- Backend: Python, FastAPI, Pydantic, SQLite.
+- Backend: Python, FastAPI, Pydantic Settings, SQLAlchemy 2.0 async, Alembic, PostgreSQL.
 - Dashboard: vanilla JavaScript, Leaflet 1.9.4, OpenStreetMap tiles.
 - Driver app: React Native 0.87, TypeScript, React Navigation, AsyncStorage, `react-native-geolocation-service`.
 - Live updates: FastAPI WebSockets.
@@ -64,7 +64,7 @@ The browser dashboard is served from `backend/static/` at `/`. It uses Leaflet a
 
 ```text
 .
-├── backend/                 FastAPI service, SQLite database, test-driver helper, dashboard assets
+├── backend/                 FastAPI service, PostgreSQL migrations, test-driver helper, dashboard assets
 ├── DriverApp/               React Native driver app, Android/iOS projects, and technical decisions
 │   └── docs/
 │       └── TECHNICAL_DECISIONS.md
@@ -75,27 +75,45 @@ The browser dashboard is served from `backend/static/` at `/`. It uses Leaflet a
 
 ## Run Locally
 
-The commands below use PowerShell on Windows. Python dependencies are installed directly because this repository does not currently include a backend requirements or project dependency file.
+The commands below use PowerShell on Windows. PostgreSQL runs through Docker Compose; the backend runs in your Python environment.
 
 ### 1. Start the backend
 
-From the repository root, create and activate a virtual environment, then install the backend and test-helper dependencies:
+From the repository root, create and activate a virtual environment, then install backend dependencies:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install fastapi uvicorn requests
+python -m pip install -r .\backend\requirements.txt
 ```
 
-Start the service with a private admin key:
+Start PostgreSQL from `backend/`, configure the backend environment, apply the schema, and seed the fixed default center:
 
 ```powershell
-$env:ADMIN_KEY = "replace-with-a-private-development-key"
 Set-Location .\backend
+$env:POSTGRES_PASSWORD = " abc"
+$env:DATABASE_URL = "postgresql+asyncpg://fleet_tracker:%20abc@localhost:5432/fleet_tracker"
+$env:ADMIN_KEY = "replace-with-a-private-development-key"
+docker compose up -d postgres
+alembic upgrade head
+python -m scripts.seed_default_center
+```
+
+If importing existing SQLite data, run this once after seeding and before starting the service:
+
+```powershell
+python .\scripts\migrate_sqlite_data.py
+```
+
+See [backend/README.md](backend/README.md) for the local PostgreSQL credentials and explanation of the URL-encoded leading space in the password.
+
+Start the service:
+
+```powershell
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-The dashboard is served at [http://localhost:8000/](http://localhost:8000/) and the interactive API docs at [http://localhost:8000/docs](http://localhost:8000/docs). Keep the backend running in this terminal. SQLite data is stored in `backend/tracking.db`.
+The dashboard is served at [http://localhost:8000/](http://localhost:8000/) and the interactive API docs at [http://localhost:8000/docs](http://localhost:8000/docs). Keep the backend running in this terminal. PostgreSQL data persists in the Compose named volume.
 
 ### 2. Create a test driver
 
