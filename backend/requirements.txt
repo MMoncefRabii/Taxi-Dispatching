@@ -4,5 +4,5 @@ sqlalchemy[asyncio]>=2.0,<3
 asyncpg
 alembic
 pydantic-settings
-argon2-cffi
+argon2-cffi==25.1.0
 requests

@@ -26,17 +26,20 @@ The FastAPI service in `backend/main.py` implements:
 
 | Route | Purpose |
 | --- | --- |
-| `POST /admin/drivers` | Create a driver using the shared `x-admin-key`; returns the driver's token. |
-| `GET /admin/drivers/latest` | Return drivers and their latest known position; requires `x-admin-key`. |
+| `POST /admin/login` | Authenticate an admin with email and password; sets an eight-hour session cookie. |
+| `POST /admin/logout` | Revoke the current admin session and clear its cookie. |
+| `GET /admin/me` | Return the authenticated admin's email and center ID. |
+| `POST /admin/drivers` | Create a driver using the authenticated admin session; returns the driver's token. |
+| `GET /admin/drivers/latest` | Return drivers and their latest known position; requires an admin session. |
 | `POST /status` | Set a driver's online flag; requires the driver's `x-token`. |
 | `POST /location` | Validate and store a driver's location; requires `x-token`. Locations with accuracy over 50 m are ignored with `{"ok": false, "ignored": "low accuracy"}`. |
-| `WS /ws?key=...` | Stream driver status and accepted location events to authorized dashboard clients. |
+| `WS /ws` | Stream driver status and accepted location events to authenticated dashboard clients. |
 
 The interactive API documentation is available at `/docs` when the backend is running.
 
 ### Admin Dashboard
 
-The browser dashboard is served from `backend/static/` at `/`. It uses Leaflet and OpenStreetMap tiles to show drivers with known coordinates, a driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. Admins can create drivers from the dashboard; the new driver's token is shown once and must be given to the driver then. The dashboard receives WebSocket updates and refreshes the driver list periodically. Dashboard access uses the shared admin key.
+The browser dashboard is served from `backend/static/` at `/`. It uses Leaflet and OpenStreetMap tiles to show drivers with known coordinates, a driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. Admins can create drivers from the dashboard; the new driver's token is shown once and must be given to the driver then. The dashboard receives WebSocket updates and refreshes the driver list periodically. Dashboard access uses per-admin email/password accounts and an eight-hour HTTP-only session cookie.
 
 ### Driver App
 
@@ -47,11 +50,11 @@ The browser dashboard is served from `backend/static/` at `/`. It uses Leaflet a
 ## What's Not Built Yet
 
 - No background location tracking; the driver app must remain foregrounded.
-- No individual admin accounts or roles; the dashboard and admin API use one shared admin key.
+- No role-based permissions; admins are scoped to their center.
 - No dispatching, order assignment, or ERP workflows.
 - PostgreSQL is used for persistence; the included Compose service is for local development only.
 - The project is not containerized and has no CI/CD pipeline or cloud deployment.
-- Automated backend/API/location-flow tests are not present. The mobile app currently has only a basic Jest render smoke test.
+- Backend tests currently cover admin authentication and latest-position list limits; broader API and location-flow coverage is not present. The mobile app currently has only a basic Jest render smoke test.
 
 ## Tech Stack
 
@@ -93,10 +96,14 @@ Start PostgreSQL from `backend/`, configure the backend environment, apply the s
 Set-Location .\backend
 $env:POSTGRES_PASSWORD = " abc"
 $env:DATABASE_URL = "postgresql+asyncpg://fleet_tracker:%20abc@localhost:5432/fleet_tracker"
-$env:ADMIN_KEY = "replace-with-a-private-development-key"
+$env:APP_ENV = "development"
+$env:DEV_DISABLE_ADMIN_AUTH = "false"
+$env:ADMIN_EMAIL = "admin@example.com"
+$env:ADMIN_PASSWORD = "replace-with-a-long-private-password"
 docker compose up -d postgres
 alembic upgrade head
 python -m scripts.seed_default_center
+python -m scripts.seed_admin
 ```
 
 If importing existing SQLite data, run this once after seeding and before starting the service:
@@ -117,7 +124,7 @@ The dashboard is served at [http://localhost:8000/](http://localhost:8000/) and 
 
 ### 2. Create a test driver
 
-In `/docs`, open `POST /admin/drivers`, provide `x-admin-key` using the exact value configured for the running backend, and submit a JSON body such as:
+In `/docs`, use `POST /admin/login` with the seeded admin email and password, then open `POST /admin/drivers` and submit a JSON body such as:
 
 ```json
 {
@@ -126,7 +133,7 @@ In `/docs`, open `POST /admin/drivers`, provide `x-admin-key` using the exact va
 }
 ```
 
-Copy the returned `token` into the driver app. The backend also includes `backend/get_test_token.py`, which creates a `TestDriver` using `ADMIN_KEY` from the helper process environment. If running it in a separate PowerShell terminal, set the same key in that terminal first.
+Copy the returned `token` into the driver app. The backend also includes `backend/get_test_token.py`, which logs in using `ADMIN_EMAIL` and `ADMIN_PASSWORD` from the helper process environment before creating a `TestDriver`.
 
 ### 3. Run the driver app on Android
 

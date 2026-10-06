@@ -622,19 +622,20 @@
     </div>
 
     <div id="loginOverlay" class="login-overlay">
-      <div class="login-box">
+      <form id="loginForm" class="login-box">
         <h2>Fleet Tracker</h2>
-        <label for="adminKeyInput">Admin key</label>
-        <input id="adminKeyInput" type="password" placeholder="Enter admin key" />
-        <div id="loginError" class="error"></div>
-        <button id="loginBtn" type="button">Open dashboard</button>
-      </div>
+        <label for="adminEmailInput">Email</label>
+        <input id="adminEmailInput" name="email" type="email" maxlength="255" autocomplete="username" required />
+        <label for="adminPasswordInput">Password</label>
+        <input id="adminPasswordInput" name="password" type="password" maxlength="128" autocomplete="current-password" required />
+        <div id="loginError" class="error" role="alert" aria-live="polite"></div>
+        <button id="loginBtn" type="submit">Log in</button>
+      </form>
     </div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" crossorigin=""></script>
   <script>
-    const ADMIN_KEY_STORAGE_KEY = 'fleet_tracker_admin_key';
     const TUNIS_CENTER = [36.8065, 10.1815];
     const STATUS = {
       ONLINE: 'online',
@@ -650,7 +651,8 @@
       liveStatus: 'reconnecting',
       search: '',
       lastRefreshAt: 0,
-      devMode: false
+      devMode: false,
+      authenticated: false
     };
 
     const map = L.map('map', { zoomControl: true }).setView(TUNIS_CENTER, 11);
@@ -664,7 +666,9 @@
 
     const elements = {
       loginOverlay: document.getElementById('loginOverlay'),
-      adminKeyInput: document.getElementById('adminKeyInput'),
+      loginForm: document.getElementById('loginForm'),
+      adminEmailInput: document.getElementById('adminEmailInput'),
+      adminPasswordInput: document.getElementById('adminPasswordInput'),
       loginError: document.getElementById('loginError'),
       loginBtn: document.getElementById('loginBtn'),
       logoutBtn: document.getElementById('logoutBtn'),
@@ -697,18 +701,6 @@
     };
 
     let oneTimeToken = '';
-
-    function getAdminKey() {
-      return sessionStorage.getItem(ADMIN_KEY_STORAGE_KEY) || '';
-    }
-
-    function setAdminKey(value) {
-      if (value) {
-        sessionStorage.setItem(ADMIN_KEY_STORAGE_KEY, value);
-      } else {
-        sessionStorage.removeItem(ADMIN_KEY_STORAGE_KEY);
-      }
-    }
 
     function getDriverStatus(driver) {
       if (!driver || driver.lat == null || driver.lng == null) {
@@ -1027,13 +1019,12 @@
     }
 
     async function fetchLatestDrivers() {
-      const key = getAdminKey();
-      if (!state.devMode && !key) return;
-      const options = state.devMode ? {} : { headers: { 'x-admin-key': key } };
-      const response = await fetch('/admin/drivers/latest', options);
+      const response = await fetch('/admin/drivers/latest', {
+        credentials: 'same-origin'
+      });
 
       if (response.status === 401) {
-        logout();
+        await logout();
         return;
       }
 
@@ -1051,14 +1042,10 @@
     }
 
     function tryConnectWebSocket() {
-      const key = getAdminKey();
-      if (!state.devMode && !key) return;
+      if (!state.authenticated) return;
 
       const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-      const wsUrl = state.devMode
-        ? `${protocol}://${location.host}/ws`
-        : `${protocol}://${location.host}/ws?key=${encodeURIComponent(key)}`;
-      const socket = new WebSocket(wsUrl);
+      const socket = new WebSocket(`${protocol}://${location.host}/ws`);
       state.ws = socket;
 
       socket.addEventListener('open', () => {
@@ -1084,10 +1071,14 @@
         if (state.ws === socket) {
           state.ws = null;
         }
+        if (!state.authenticated) return;
         if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
         state.reconnectTimer = setTimeout(() => {
           tryConnectWebSocket();
-          fetchLatestDrivers().catch(() => {});
+          fetchLatestDrivers().catch((err) => {
+            console.error(err);
+            setLiveStatus('Reconnecting', false);
+          });
         }, 3000);
       });
 
@@ -1098,9 +1089,9 @@
 
     function showLogin() {
       elements.loginOverlay.style.display = 'flex';
-      elements.adminKeyInput.value = '';
+      elements.adminPasswordInput.value = '';
       elements.loginError.textContent = '';
-      elements.adminKeyInput.focus();
+      elements.adminEmailInput.focus();
     }
 
     function hideLogin() {
@@ -1138,15 +1129,12 @@
       elements.submitNewDriverBtn.disabled = true;
       const name = elements.newDriverName.value;
       const phone = elements.newDriverPhone.value;
-      const headers = { 'Content-Type': 'application/json' };
-      if (!state.devMode) {
-        headers['x-admin-key'] = getAdminKey();
-      }
 
       try {
         const response = await fetch('/admin/drivers', {
           method: 'POST',
-          headers,
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, phone })
         });
 
@@ -1191,40 +1179,62 @@
       }
     }
 
-    async function login() {
-      const key = elements.adminKeyInput.value.trim();
-      if (!key) {
-        elements.loginError.textContent = 'Admin key is required.';
-        return;
-      }
-
+    async function login(event) {
+      event.preventDefault();
+      if (!elements.loginForm.reportValidity()) return;
+      elements.loginBtn.disabled = true;
+      elements.loginError.textContent = '';
       try {
-        const response = await fetch('/admin/drivers/latest', {
-          headers: { 'x-admin-key': key }
+        const response = await fetch('/admin/login', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: elements.adminEmailInput.value,
+            password: elements.adminPasswordInput.value
+          })
         });
 
         if (response.status === 401) {
-          elements.loginError.textContent = 'Invalid admin key.';
+          elements.loginError.textContent = 'Invalid email or password.';
           return;
         }
 
         if (!response.ok) {
-          throw new Error('Unable to reach backend');
+          throw new Error(`Unable to log in: ${response.status}`);
         }
 
-        setAdminKey(key);
-        elements.loginError.textContent = '';
+        state.authenticated = true;
+        state.devMode = false;
+        elements.devModeBanner.style.display = 'none';
+        elements.adminPasswordInput.value = '';
         hideLogin();
         await fetchLatestDrivers();
         tryConnectWebSocket();
       } catch (err) {
         console.error(err);
         elements.loginError.textContent = 'Unable to connect to the server.';
+      } finally {
+        elements.loginBtn.disabled = false;
       }
     }
 
-    function logout() {
-      setAdminKey('');
+    async function logout() {
+      let logoutFailed = false;
+      try {
+        const response = await fetch('/admin/logout', {
+          method: 'POST',
+          credentials: 'same-origin'
+        });
+        if (!response.ok) {
+          throw new Error(`Unable to log out: ${response.status}`);
+        }
+      } catch (err) {
+        console.error(err);
+        logoutFailed = true;
+      }
+
+      state.authenticated = false;
       if (state.ws) {
         state.ws.close();
         state.ws = null;
@@ -1236,6 +1246,10 @@
       state.drivers.clear();
       updateDriverListState();
       showLogin();
+      if (logoutFailed) {
+        elements.loginError.textContent =
+          'Unable to confirm logout with the server. Please try again.';
+      }
     }
 
     function startStatusTimer() {
@@ -1245,50 +1259,39 @@
       }, 5000);
     }
 
-    function initializeWithAdminKey() {
-      const key = getAdminKey();
-      if (key) {
-        hideLogin();
-        fetchLatestDrivers().catch(() => {
-          showLogin();
-          elements.loginError.textContent = 'Unable to load drivers.';
-        });
-        tryConnectWebSocket();
-      } else {
-        showLogin();
-      }
-    }
-
-    async function probeDevMode() {
+    async function initialize() {
       try {
-        const response = await fetch('/admin/drivers/latest');
-        if (response.status === 200) {
-          state.devMode = true;
-          elements.devModeBanner.style.display = 'block';
-          hideLogin();
-          const rows = await response.json();
-          state.drivers.clear();
-          for (const row of rows) {
-            updateDriverFromListRow(row);
-          }
-          updateDriverListState();
-          state.lastRefreshAt = Date.now();
-          tryConnectWebSocket();
-          return;
-        }
+        const response = await fetch('/admin/me', {
+          credentials: 'same-origin'
+        });
         if (response.status === 401) {
-          initializeWithAdminKey();
+          state.authenticated = false;
+          state.devMode = false;
+          elements.devModeBanner.style.display = 'none';
+          showLogin();
           return;
         }
-        throw new Error(`Unable to probe admin access: ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`Unable to check admin session: ${response.status}`);
+        }
+
+        const admin = await response.json();
+        state.authenticated = true;
+        state.devMode = admin.dev_mode === true;
+        elements.devModeBanner.style.display = state.devMode ? 'block' : 'none';
+        hideLogin();
+        await fetchLatestDrivers();
+        tryConnectWebSocket();
       } catch (err) {
         console.error(err);
-        initializeWithAdminKey();
+        state.authenticated = false;
+        showLogin();
+        elements.loginError.textContent = 'Unable to check your admin session.';
       }
     }
 
     function init() {
-      elements.loginBtn.addEventListener('click', login);
+      elements.loginForm.addEventListener('submit', login);
       elements.logoutBtn.addEventListener('click', logout);
       elements.newDriverBtn.addEventListener('click', showNewDriverDialog);
       elements.cancelNewDriverBtn.addEventListener('click', closeNewDriverDialog);
@@ -1326,18 +1329,12 @@
       elements.fitBtn.addEventListener('click', () => {
         maybeFitMap();
       });
-      elements.adminKeyInput.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-          login();
-        }
-      });
-
       document.getElementById('sidebar').addEventListener('click', (event) => {
         if (event.target.closest('button')) return;
       });
 
       startStatusTimer();
-      probeDevMode();
+      initialize();
     }
 
     init();

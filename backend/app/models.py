@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -43,10 +43,13 @@ class SuperAdmin(Base):
 
 class Admin(Base):
     __tablename__ = "admins"
-    __table_args__ = (UniqueConstraint("center_id", "email", name="uq_admin_center_email"),)
+    __table_args__ = (
+        CheckConstraint("email = lower(email)", name="ck_admin_email_lowercase"),
+        UniqueConstraint("email", name="uq_admin_email"),
+    )
     id: Mapped[uuid.UUID] = uuid_pk()
     center_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("centers.id"), nullable=False, index=True)
-    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="center_admin")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -55,6 +58,22 @@ class Admin(Base):
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     center: Mapped[Center] = relationship(back_populates="admins")
     audit_logs: Mapped[list[AuditLog]] = relationship(back_populates="actor_admin")
+    sessions: Mapped[list[AdminSession]] = relationship(back_populates="admin")
+
+
+class AdminSession(Base):
+    __tablename__ = "admin_sessions"
+    __table_args__ = (
+        Index("ix_admin_sessions_token_hash", "token_hash", unique=True),
+        Index("ix_admin_sessions_admin_id", "admin_id"),
+    )
+    id: Mapped[uuid.UUID] = uuid_pk()
+    admin_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("admins.id"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    admin: Mapped[Admin] = relationship(back_populates="sessions")
 
 
 class AuditLog(Base):
