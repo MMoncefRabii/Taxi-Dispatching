@@ -1,59 +1,59 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createDriverToken } from '../../src/api/client';
+import {
+  ApiError,
+  postJson,
+  setUnauthorizedHandler,
+} from '../../src/api/client';
 
 const mockedStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
 const fetchMock = jest.fn();
 
-describe('createDriverToken', () => {
+describe('postJson', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockedStorage.getItem.mockResolvedValue('http://localhost:8000');
+    mockedStorage.getItem.mockImplementation(async key =>
+      key === 'driver_token' ? 'driver-token' : 'http://localhost:8000',
+    );
     global.fetch = fetchMock;
+    setUnauthorizedHandler(null);
   });
 
-  it('creates a driver token through the existing admin endpoint', async () => {
+  afterEach(() => setUnauthorizedHandler(null));
+
+  it('sends the saved driver token to the requested driver endpoint', async () => {
     fetchMock.mockResolvedValue({
       ok: true,
-      json: async () => ({
-        id: 'driver-id',
-        name: 'Amina',
-        token: 'one-time-driver-token',
-      }),
+      status: 200,
+      json: async () => ({ ok: true }),
     });
 
-    const token = await createDriverToken({
-      adminKey: 'admin-secret',
-      name: 'Amina',
-      phone: '+15550100',
-    });
+    const result = await postJson('/status', { online: true });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/admin/drivers',
+      'http://localhost:8000/status',
       expect.objectContaining({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-key': 'admin-secret',
+          'x-token': 'driver-token',
         },
-        body: JSON.stringify({ name: 'Amina', phone: '+15550100' }),
+        body: JSON.stringify({ online: true }),
       }),
     );
-    expect(token).toBe('one-time-driver-token');
+    expect(result).toEqual({ ok: true });
   });
 
-  it('rejects an unsuccessful driver creation response', async () => {
+  it('runs the unauthorized handler and rejects a 401 response', async () => {
+    const unauthorizedHandler = jest.fn();
+    setUnauthorizedHandler(unauthorizedHandler);
     fetchMock.mockResolvedValue({
       ok: false,
       status: 401,
-      json: async () => ({ detail: 'Invalid admin key' }),
     });
 
-    await expect(
-      createDriverToken({
-        adminKey: 'wrong-key',
-        name: 'Amina',
-        phone: '+15550100',
-      }),
-    ).rejects.toThrow('Invalid admin key');
+    await expect(postJson('/status', { online: false })).rejects.toEqual(
+      new ApiError('Session expired.', 401),
+    );
+    expect(unauthorizedHandler).toHaveBeenCalledTimes(1);
   });
 });

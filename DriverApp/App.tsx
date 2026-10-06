@@ -31,7 +31,10 @@ function AppNavigation() {
   useEffect(() => {
     setUnauthorizedHandler(async () => {
       await AsyncStorage.removeItem('driver_token');
-      Alert.alert('Session expired', 'Please re-enter your token.');
+      Alert.alert(
+        'Invalid driver token',
+        'Your token was rejected. Please check it with your admin and enter it again.',
+      );
       setToken(null);
     });
     return () => setUnauthorizedHandler(null);

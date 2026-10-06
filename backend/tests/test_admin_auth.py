@@ -108,3 +108,42 @@ def test_app_refuses_to_start_when_admin_auth_is_disabled_in_production(monkeypa
     with pytest.raises(RuntimeError, match="APP_ENV=production"):
         with TestClient(main.app):
             pass
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_latest_positions_applies_limit_in_sql(monkeypatch, mock_db):
+    set_auth_mode(monkeypatch, app_env="development", disabled=True)
+
+    with TestClient(main.app) as client:
+        response = client.get("/admin/drivers/latest?limit=1")
+
+    assert response.status_code == 200
+    query = mock_db.execute.await_args.args[0]
+    assert query._limit_clause.value == 1
+    assert "ORDER BY drivers.name, drivers.id" in str(query.compile())
+    assert len(response.json()) <= 1
+
+
+@pytest.mark.parametrize("limit", [0, 1001, 5000])
+@pytest.mark.usefixtures("mock_db")
+def test_latest_positions_rejects_out_of_range_limit(monkeypatch, mock_db, limit):
+    set_auth_mode(monkeypatch, app_env="development", disabled=True)
+
+    with TestClient(main.app) as client:
+        response = client.get(f"/admin/drivers/latest?limit={limit}")
+
+    assert response.status_code == 422
+    mock_db.execute.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_latest_positions_defaults_to_500_limit(monkeypatch, mock_db):
+    set_auth_mode(monkeypatch, app_env="development", disabled=True)
+
+    with TestClient(main.app) as client:
+        response = client.get("/admin/drivers/latest")
+
+    assert response.status_code == 200
+    query = mock_db.execute.await_args.args[0]
+    assert query._limit_clause.value == 500
+    assert response.json() == []

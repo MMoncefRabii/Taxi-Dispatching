@@ -138,6 +138,7 @@ async def create_driver(
 
 @app.get("/admin/drivers/latest")
 async def latest_positions(
+    limit: int = Query(default=500, ge=1, le=1000),
     x_admin_key: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -179,6 +180,8 @@ async def latest_positions(
                 & (ranked_locations.c.row_number == 1),
             )
             .where(Driver.center_id == DEFAULT_CENTER_ID)
+            .order_by(Driver.name, Driver.id)
+            .limit(limit)
         )
     ).all()
     return [
