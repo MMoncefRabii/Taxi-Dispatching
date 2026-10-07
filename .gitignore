@@ -9,10 +9,6 @@ __pycache__/
 .env.*
 !.env.example
 
-# Local SQLite data and journals
-backend/*.db
-backend/*.db-*
-
 # JavaScript dependencies and generated output
 node_modules/
 coverage/

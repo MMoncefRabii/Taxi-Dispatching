@@ -11,10 +11,6 @@ class Settings(BaseSettings):
         default="production",
         validation_alias="APP_ENV",
     )
-    dev_disable_admin_auth: bool = Field(
-        default=False,
-        validation_alias="DEV_DISABLE_ADMIN_AUTH",
-    )
 
     @field_validator("app_env", mode="before")
     @classmethod

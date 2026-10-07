@@ -7,7 +7,6 @@ services:
       POSTGRES_USER: fleet_tracker
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fleet_tracker_dev}
       DATABASE_URL: postgresql+asyncpg://fleet_tracker:${POSTGRES_PASSWORD:-fleet_tracker_dev}@postgres:5432/fleet_tracker
-      ADMIN_KEY: ${ADMIN_KEY:-change-this-development-admin-key}
     ports:
       - "5432:5432"
     volumes:

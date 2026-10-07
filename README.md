@@ -90,26 +90,17 @@ python -m venv .venv
 python -m pip install -r .\backend\requirements.txt
 ```
 
-Start PostgreSQL from `backend/`, configure the backend environment, apply the schema, and seed the fixed default center:
+Start PostgreSQL from `backend/`, configure the backend environment, apply the schema, and seed the initial center:
 
 ```powershell
 Set-Location .\backend
 $env:POSTGRES_PASSWORD = " abc"
 $env:DATABASE_URL = "postgresql+asyncpg://fleet_tracker:%20abc@localhost:5432/fleet_tracker"
 $env:APP_ENV = "development"
-$env:DEV_DISABLE_ADMIN_AUTH = "false"
-$env:ADMIN_EMAIL = "admin@example.com"
-$env:ADMIN_PASSWORD = "replace-with-a-long-private-password"
 docker compose up -d postgres
 alembic upgrade head
 python -m scripts.seed_default_center
-python -m scripts.seed_admin
-```
-
-If importing existing SQLite data, run this once after seeding and before starting the service:
-
-```powershell
-python .\scripts\migrate_sqlite_data.py
+python -m scripts.seed_admin --email admin@example.com
 ```
 
 See [backend/README.md](backend/README.md) for the local PostgreSQL credentials and explanation of the URL-encoded leading space in the password.
@@ -133,7 +124,7 @@ In `/docs`, use `POST /admin/login` with the seeded admin email and password, th
 }
 ```
 
-Copy the returned `token` into the driver app. The backend also includes `backend/get_test_token.py`, which logs in using `ADMIN_EMAIL` and `ADMIN_PASSWORD` from the helper process environment before creating a `TestDriver`.
+Copy the returned `token` into the driver app.
 
 ### 3. Run the driver app on Android
 

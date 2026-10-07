@@ -1,18 +1,29 @@
+import argparse
 import asyncio
-import os
+import getpass
 import sys
 import uuid
+from pathlib import Path
 
 from argon2 import PasswordHasher
 from sqlalchemy import func, select
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from app.db import SessionLocal, engine
 from app.models import Admin, Center
 
-DEFAULT_CENTER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+class CenterSelectionError(Exception):
+    pass
 
 
-async def seed_admin(email: str, password: str) -> None:
+async def seed_admin(
+    email: str,
+    password: str,
+    center_id: uuid.UUID | None = None,
+) -> None:
     normalized_email = email.strip().lower()
     async with SessionLocal() as session:
         result = await session.execute(
@@ -22,21 +33,28 @@ async def seed_admin(email: str, password: str) -> None:
             print("Admin already exists; no changes made.")
             return
 
-        center = await session.get(Center, DEFAULT_CENTER_ID)
-        if center is None:
-            session.add(
-                Center(
-                    id=DEFAULT_CENTER_ID,
-                    name="Tunis Center",
-                    city="Tunis",
-                    timezone="Africa/Tunis",
-                )
+        if center_id is None:
+            centers = list(
+                (
+                    await session.scalars(
+                        select(Center).order_by(Center.id)
+                    )
+                ).all()
             )
-            await session.flush()
+            if len(centers) != 1:
+                raise CenterSelectionError(
+                    f"Cannot choose a center: found {len(centers)}; "
+                    "specify --center-id."
+                )
+            center = centers[0]
+        else:
+            center = await session.get(Center, center_id)
+        if center is None:
+            raise CenterSelectionError(f"Center {center_id} does not exist.")
 
         session.add(
             Admin(
-                center_id=DEFAULT_CENTER_ID,
+                center_id=center.id,
                 email=normalized_email,
                 password_hash=PasswordHasher().hash(password),
                 role="center_admin",
@@ -44,30 +62,41 @@ async def seed_admin(email: str, password: str) -> None:
             )
         )
         await session.commit()
-    print(f"Created admin {normalized_email} for the default center.")
+    print(f"Created admin {normalized_email} for center {center.id}.")
 
 
-async def seed_and_dispose(email: str, password: str) -> None:
+async def seed_and_dispose(
+    email: str,
+    password: str,
+    center_id: uuid.UUID | None,
+) -> None:
     try:
-        await seed_admin(email, password)
+        await seed_admin(email, password, center_id)
     finally:
         await engine.dispose()
 
 
 def main() -> None:
-    email = os.getenv("ADMIN_EMAIL", "")
-    password = os.getenv("ADMIN_PASSWORD", "")
-    if not email or len(email) > 255 or "@" not in email:
-        print("ERROR: ADMIN_EMAIL must be a valid email address.", file=sys.stderr)
-        raise SystemExit(1)
-    if len(password) < 12 or len(password) > 128:
-        print(
-            "ERROR: ADMIN_PASSWORD must be between 12 and 128 characters.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
+    parser = argparse.ArgumentParser(description="Create the first center admin.")
+    parser.add_argument("--email", required=True)
+    parser.add_argument("--center-id", type=uuid.UUID)
+    args = parser.parse_args()
 
-    asyncio.run(seed_and_dispose(email, password))
+    email = args.email.strip().lower()
+    if not email or len(email) > 255 or "@" not in email:
+        parser.error("--email must be a valid email address.")
+
+    password = getpass.getpass("Admin password: ")
+    confirmation = getpass.getpass("Confirm admin password: ")
+    if password != confirmation:
+        parser.error("Passwords do not match.")
+    if len(password) < 12 or len(password) > 128:
+        parser.error("Password must be between 12 and 128 characters.")
+
+    try:
+        asyncio.run(seed_and_dispose(email, password, args.center_id))
+    except CenterSelectionError as error:
+        parser.error(str(error))
 
 
 if __name__ == "__main__":
