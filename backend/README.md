@@ -10,7 +10,7 @@ This setup is for local development only. Do not use the development database pa
 - Host port: `5432`
 - Database URL: `postgresql+asyncpg://fleet_tracker:%20abc@localhost:5432/fleet_tracker`
 
-The `%20` in the URL encodes the leading space in the password. Set `POSTGRES_PASSWORD` as well as `DATABASE_URL`: Compose uses the former when initializing PostgreSQL, while the backend uses the latter to connect.
+The `%20` in the URL encodes the leading space in the password. Set `POSTGRES_PASSWORD` for PostgreSQL initialization and `DATABASE_URL` for the backend connection.
 
 ## Admin authentication settings
 
@@ -32,6 +32,16 @@ python -m scripts.seed_admin --email admin@example.com
 python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-The admin seed asks for the password twice using hidden input and requires 12 to 128 characters. It selects the only existing center. If there are zero or multiple centers, it stops with an error unless you provide `--center-id <UUID>`. The default-center seed creates a center only when none exists. Both seed commands are idempotent for already-existing data.
+The admin seed checks whether the email already exists before prompting. If it does, it prints `Admin already exists; no changes made.` and exits without requesting a password. Otherwise it asks for the password twice using hidden input and requires 12 to 128 characters. It selects the only existing center. If there are zero or multiple centers, it stops with an error unless you provide `--center-id <UUID>`.
+
+Deactivate an admin from `backend/` with:
+
+```powershell
+python -m scripts.deactivate_admin --email admin@example.com
+```
+
+Deactivation marks the admin inactive, records the UTC deactivation time, and revokes its non-revoked sessions in one transaction. It refuses to deactivate the last active admin of a center. Re-running it for an already inactive admin makes no changes. Both admin seed and deactivation commands leave existing rows in place.
+
+The default-center seed creates a center only when none exists.
 
 Keep the backend command running in that terminal. The dashboard is at [http://localhost:8000/](http://localhost:8000/) and the API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs).
