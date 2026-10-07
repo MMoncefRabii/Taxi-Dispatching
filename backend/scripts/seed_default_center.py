@@ -1,34 +1,38 @@
 import asyncio
-import uuid
+import sys
+from pathlib import Path
 
 from sqlalchemy import select
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from app.db import SessionLocal, engine
 from app.models import Center
-
-DEFAULT_CENTER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 async def seed_default_center() -> None:
     async with SessionLocal() as session:
         center = await session.scalar(select(Center).limit(1))
         if center is None:
-            session.add(
-                Center(
-                    id=DEFAULT_CENTER_ID,
-                    name="Tunis Center",
-                    city="Tunis",
-                    timezone="Africa/Tunis",
-                )
+            center = Center(
+                name="Tunis Center",
+                city="Tunis",
+                timezone="Africa/Tunis",
             )
+            session.add(center)
             await session.commit()
-            print(f"Created Tunis Center ({DEFAULT_CENTER_ID})")
+            print(f"Created Tunis Center ({center.id})")
         else:
             print(f"Center already exists; keeping {center.name} ({center.id})")
 
 
-if __name__ == "__main__":
+async def seed_and_dispose() -> None:
     try:
-        asyncio.run(seed_default_center())
+        await seed_default_center()
     finally:
-        asyncio.run(engine.dispose())
+        await engine.dispose()
+
+
+if __name__ == "__main__":
+    asyncio.run(seed_and_dispose())

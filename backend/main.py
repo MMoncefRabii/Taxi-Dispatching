@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import logging
 import secrets
 import time
 import uuid
@@ -24,23 +23,11 @@ from app.models import Admin, AdminSession, Driver, DriverLocation
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
-DEFAULT_CENTER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 MAX_ACCURACY_M = 50
 ADMIN_SESSION_COOKIE = "admin_session"
 ADMIN_SESSION_TTL = timedelta(hours=8)
 password_hasher = PasswordHasher()
 dummy_password_hash = password_hasher.hash(secrets.token_urlsafe(32))
-
-
-def admin_auth_disabled() -> bool:
-    # TODO: Remove this helper and setting in Task 6, then restore unconditional admin checks for HTTP and WebSocket.
-    if not settings.dev_disable_admin_auth:
-        return False
-    if settings.app_env == "production":
-        raise RuntimeError(
-            "DEV_DISABLE_ADMIN_AUTH cannot be enabled when APP_ENV=production"
-        )
-    return True
 
 
 def _normalize_recorded_at(value: float | None) -> float:
@@ -56,8 +43,6 @@ def _as_utc_datetime(timestamp: float) -> datetime:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if admin_auth_disabled():
-        logging.getLogger(__name__).warning("ADMIN AUTH DISABLED (DEV MODE)")
     yield
     await engine.dispose()
 
@@ -125,9 +110,7 @@ async def _admin_from_session(token: str, db: AsyncSession) -> Admin | None:
 async def require_admin(
     request: Request,
     db: AsyncSession = Depends(get_db),
-) -> Admin | None:
-    if admin_auth_disabled():
-        return None
+) -> Admin:
     token = request.cookies.get(ADMIN_SESSION_COOKIE)
     if not token:
         raise HTTPException(401, "Authentication required")
@@ -231,12 +214,9 @@ async def admin_me(
     db: AsyncSession = Depends(get_db),
 ):
     admin = await require_admin(request, db)
-    if admin is None:
-        return {"email": None, "center_id": None, "dev_mode": True}
     return {
         "email": admin.email.lower(),
         "center_id": str(admin.center_id),
-        "dev_mode": False,
     }
 
 
@@ -247,7 +227,6 @@ async def get_driver(token: str | None, db: AsyncSession) -> Driver:
     result = await db.execute(
         select(Driver).where(
             Driver.token_hash == token_hash,
-            Driver.center_id == DEFAULT_CENTER_ID,
             Driver.active.is_(True),
         )
     )
@@ -277,11 +256,11 @@ async def broadcast(message: dict, center_id: uuid.UUID) -> None:
 async def create_driver(
     body: NewDriver,
     db: AsyncSession = Depends(get_db),
-    admin: Admin | None = Depends(require_admin),
+    admin: Admin = Depends(require_admin),
 ):
     token = secrets.token_urlsafe(24)
     driver = Driver(
-        center_id=admin.center_id if admin is not None else DEFAULT_CENTER_ID,
+        center_id=admin.center_id,
         name=body.name,
         phone=body.phone,
         token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
@@ -295,9 +274,9 @@ async def create_driver(
 async def latest_positions(
     limit: int = Query(default=500, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    admin: Admin | None = Depends(require_admin),
+    admin: Admin = Depends(require_admin),
 ):
-    center_id = admin.center_id if admin is not None else DEFAULT_CENTER_ID
+    center_id = admin.center_id
     ranked_locations = (
         select(
             DriverLocation.driver_id.label("driver_id"),
@@ -386,7 +365,7 @@ async def post_location(
     timestamp = _normalize_recorded_at(loc.recorded_at)
     db.add(
         DriverLocation(
-            center_id=DEFAULT_CENTER_ID,
+            center_id=driver.center_id,
             driver_id=driver.id,
             lat=loc.lat,
             lng=loc.lng,
@@ -433,19 +412,17 @@ async def ws_endpoint(
         await ws.close(code=1008)
         return
 
-    admin = None
-    if not admin_auth_disabled():
-        token = ws.cookies.get(ADMIN_SESSION_COOKIE)
-        if not token:
-            await ws.close(code=1008)
-            return
-        admin = await _admin_from_session(token, db)
-        if admin is None:
-            await ws.close(code=1008)
-            return
+    token = ws.cookies.get(ADMIN_SESSION_COOKIE)
+    if not token:
+        await ws.close(code=1008)
+        return
+    admin = await _admin_from_session(token, db)
+    if admin is None:
+        await ws.close(code=1008)
+        return
 
     await ws.accept()
-    clients[ws] = admin.center_id if admin is not None else DEFAULT_CENTER_ID
+    clients[ws] = admin.center_id
     try:
         while True:
             await ws.receive_text()
