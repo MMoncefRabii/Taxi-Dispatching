@@ -19,6 +19,19 @@ class CenterSelectionError(Exception):
     pass
 
 
+class PasswordInputError(Exception):
+    pass
+
+
+async def admin_exists(email: str) -> bool:
+    normalized_email = email.strip().lower()
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(Admin).where(func.lower(Admin.email) == normalized_email)
+        )
+        return result.scalar_one_or_none() is not None
+
+
 async def seed_admin(
     email: str,
     password: str,
@@ -65,12 +78,21 @@ async def seed_admin(
     print(f"Created admin {normalized_email} for center {center.id}.")
 
 
-async def seed_and_dispose(
-    email: str,
-    password: str,
-    center_id: uuid.UUID | None,
-) -> None:
+async def seed_from_prompt(email: str, center_id: uuid.UUID | None) -> None:
     try:
+        if await admin_exists(email):
+            print("Admin already exists; no changes made.")
+            return
+
+        password = getpass.getpass("Admin password: ")
+        confirmation = getpass.getpass("Confirm admin password: ")
+        if password != confirmation:
+            raise PasswordInputError("Passwords do not match.")
+        if len(password) < 12 or len(password) > 128:
+            raise PasswordInputError(
+                "Password must be between 12 and 128 characters."
+            )
+
         await seed_admin(email, password, center_id)
     finally:
         await engine.dispose()
@@ -86,16 +108,9 @@ def main() -> None:
     if not email or len(email) > 255 or "@" not in email:
         parser.error("--email must be a valid email address.")
 
-    password = getpass.getpass("Admin password: ")
-    confirmation = getpass.getpass("Confirm admin password: ")
-    if password != confirmation:
-        parser.error("Passwords do not match.")
-    if len(password) < 12 or len(password) > 128:
-        parser.error("Password must be between 12 and 128 characters.")
-
     try:
-        asyncio.run(seed_and_dispose(email, password, args.center_id))
-    except CenterSelectionError as error:
+        asyncio.run(seed_from_prompt(email, args.center_id))
+    except (CenterSelectionError, PasswordInputError) as error:
         parser.error(str(error))
 
 

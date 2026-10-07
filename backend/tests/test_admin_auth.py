@@ -1,5 +1,7 @@
+import asyncio
 import hashlib
 import os
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, Mock
@@ -9,6 +11,8 @@ os.environ.setdefault(
     "postgresql+asyncpg://fleet_tracker:password@localhost:5432/fleet_tracker",
 )
 
+import scripts.deactivate_admin as deactivate_admin_script
+import scripts.seed_admin as seed_admin_script
 import pytest
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
@@ -51,6 +55,26 @@ def scalar_result(value):
         scalar_one_or_none=Mock(return_value=value),
         all=Mock(return_value=[]),
     )
+
+
+class FakeAsyncContext:
+    def __init__(self):
+        self.exception = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        self.exception = exc_value
+
+
+class FakeSession(FakeAsyncContext):
+    def __init__(self, execute_results=(), scalar_result_value=None):
+        super().__init__()
+        self.execute = AsyncMock(side_effect=execute_results)
+        self.scalar = AsyncMock(return_value=scalar_result_value)
+        self.transaction = FakeAsyncContext()
+        self.begin = Mock(return_value=self.transaction)
 
 
 def make_admin(password: str = "correct horse battery staple") -> Admin:
@@ -205,6 +229,28 @@ def test_wrong_password_and_unknown_email_share_same_401(monkeypatch, mock_db):
 
 
 @pytest.mark.usefixtures("mock_db")
+def test_inactive_admin_login_uses_generic_401(monkeypatch, mock_db):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    admin.active = False
+    mock_db.execute.return_value = scalar_result(admin)
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/admin/login",
+            json={
+                "email": "admin@example.com",
+                "password": "correct horse battery staple",
+            },
+        )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid email or password"
+    mock_db.add.assert_not_called()
+    mock_db.commit.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("mock_db")
 def test_login_rejects_extra_fields_and_oversized_password(monkeypatch, mock_db):
     set_app_env(monkeypatch, "development")
 
@@ -275,6 +321,8 @@ def test_inactive_admin_session_is_rejected(monkeypatch, mock_db):
 
     assert response.status_code == 401
     assert mock_db.execute.await_count == 2
+    admin_query = mock_db.execute.await_args_list[1].args[0]
+    assert "admins.active IS true" in str(admin_query.compile())
 
 
 @pytest.mark.usefixtures("mock_db")
@@ -299,6 +347,147 @@ def test_logout_revokes_session_and_clears_cookie(monkeypatch, mock_db):
     assert "admin_session=" in response.headers["set-cookie"]
     assert "max-age=0" in response.headers["set-cookie"].lower()
     mock_db.commit.assert_awaited_once()
+
+
+def test_deactivate_admin_updates_admin_and_revokes_sessions(monkeypatch, capsys):
+    admin = make_admin()
+    session = FakeSession(
+        execute_results=[
+            scalar_result(admin),
+            Mock(),
+            Mock(),
+        ],
+        scalar_result_value=2,
+    )
+    monkeypatch.setattr(deactivate_admin_script, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        deactivate_admin_script,
+        "engine",
+        Mock(dispose=AsyncMock()),
+    )
+    before = datetime.now(timezone.utc)
+
+    changed = asyncio.run(
+        deactivate_admin_script.deactivate_and_dispose(admin.email)
+    )
+
+    after = datetime.now(timezone.utc)
+    assert changed is True
+    assert admin.active is False
+    assert before <= admin.deactivated_at <= after
+    assert admin.deactivated_at.tzinfo == timezone.utc
+    assert session.begin.call_count == 1
+    assert session.transaction.exception is None
+    assert session.execute.await_count == 3
+    assert session.scalar.await_count == 1
+    revoke_query = session.execute.await_args_list[2].args[0]
+    assert "UPDATE admin_sessions SET revoked_at" in str(revoke_query.compile())
+    assert "admin_sessions.revoked_at IS NULL" in str(revoke_query.compile())
+    assert "token_hash" not in str(revoke_query.compile())
+    assert capsys.readouterr().out == ""
+
+
+def test_deactivate_admin_already_inactive_makes_no_changes(monkeypatch, capsys):
+    admin = make_admin()
+    admin.active = False
+    original_deactivated_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    admin.deactivated_at = original_deactivated_at
+    session = FakeSession(execute_results=[scalar_result(admin)])
+    monkeypatch.setattr(deactivate_admin_script, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        deactivate_admin_script,
+        "engine",
+        Mock(dispose=AsyncMock()),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["deactivate_admin", "--email", admin.email],
+    )
+
+    exit_code = deactivate_admin_script.main()
+
+    assert exit_code == 0
+    assert admin.active is False
+    assert admin.deactivated_at is original_deactivated_at
+    assert session.execute.await_count == 1
+    session.scalar.assert_not_awaited()
+    assert "Admin is already inactive; no changes made." in capsys.readouterr().out
+
+
+def test_deactivate_admin_unknown_email_exits_with_code_one(
+    monkeypatch, capsys
+):
+    session = FakeSession(execute_results=[scalar_result(None)])
+    monkeypatch.setattr(deactivate_admin_script, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        deactivate_admin_script,
+        "engine",
+        Mock(dispose=AsyncMock()),
+    )
+    monkeypatch.setattr(sys, "argv", ["deactivate_admin", "--email", "missing@example.com"])
+
+    exit_code = deactivate_admin_script.main()
+
+    assert exit_code == 1
+    assert "No admin found for email missing@example.com." in capsys.readouterr().err
+    assert session.transaction.exception is not None
+
+
+def test_deactivate_admin_refuses_last_active_admin(monkeypatch):
+    admin = make_admin()
+    session = FakeSession(
+        execute_results=[
+            scalar_result(admin),
+            Mock(),
+        ],
+        scalar_result_value=1,
+    )
+    monkeypatch.setattr(deactivate_admin_script, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        deactivate_admin_script,
+        "engine",
+        Mock(dispose=AsyncMock()),
+    )
+
+    with pytest.raises(
+        deactivate_admin_script.AdminDeactivationError,
+        match="last active admin",
+    ):
+        asyncio.run(deactivate_admin_script.deactivate_and_dispose(admin.email))
+
+    assert admin.active is True
+    assert admin.deactivated_at is None
+    assert session.execute.await_count == 2
+    assert session.transaction.exception is not None
+
+
+def test_seed_admin_existing_email_does_not_prompt(monkeypatch, capsys):
+    session = FakeSession(execute_results=[scalar_result(make_admin())])
+    monkeypatch.setattr(seed_admin_script, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        seed_admin_script,
+        "engine",
+        Mock(dispose=AsyncMock()),
+    )
+    monkeypatch.setattr(
+        seed_admin_script.getpass,
+        "getpass",
+        lambda *_args: pytest.fail("password prompt must not be shown"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["seed_admin", "--email", "admin@example.com"],
+    )
+
+    seed_admin_script.main()
+
+    assert session.execute.await_count == 1
+    assert (
+        capsys.readouterr().out.strip()
+        == "Admin already exists; no changes made."
+    )
 
 
 @pytest.mark.usefixtures("mock_db")
