@@ -5,13 +5,22 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from urllib.parse import urlsplit
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,9 +29,6 @@ from app.config import settings
 from app.db import engine, get_db
 from app.models import Admin, AdminSession, Driver, DriverLocation
 
-BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
 MAX_ACCURACY_M = 50
 ADMIN_SESSION_COOKIE = "admin_session"
 ADMIN_SESSION_TTL = timedelta(hours=8)
@@ -48,6 +54,13 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Fleet Tracker", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_web_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-Token"],
+)
 clients: dict[WebSocket, uuid.UUID] = {}
 
 
@@ -121,7 +134,11 @@ async def require_admin(
 
 
 def _origin_matches_host(origin: str | None, host: str | None) -> bool:
-    if not origin or not host:
+    if not origin:
+        return False
+    if origin in settings.allowed_web_origins:
+        return True
+    if not host:
         return False
     try:
         parsed_origin = urlsplit(origin)
@@ -430,6 +447,3 @@ async def ws_endpoint(
         pass
     finally:
         clients.pop(ws, None)
-
-
-app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

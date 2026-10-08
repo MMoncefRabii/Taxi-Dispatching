@@ -5,18 +5,12 @@ Fleet Tracker is a real-time GPS tracking system for taxi drivers and fleet oper
 ## Architecture
 
 ```text
-+-------------------+       HTTP/JSON         +------------------+       persist/query       +-------------+
-| Driver mobile app | ----------------------> | FastAPI backend  | ----------------------> | PostgreSQL  |
-| React Native      |                         |                  |                          +-------------+
-+-------------------+                         |                  |
-                                              | WebSocket events |-------------------------------+
-                                              +------------------+                               |
-                                                                                                  v
-                                                                                         +------------------+
-                                                                                         | Admin dashboard  |
-                                                                                         | Browser + Leaflet|
-                                                                                         +------------------+
+Driver mobile app (React Native / TypeScript) ──HTTP──┐
+                                                      ├──> Backend (Python / FastAPI) ──> PostgreSQL
+Admin web frontend (HTML / CSS / JavaScript) ─HTTP/WS─┘
 ```
+
+These are separate applications. The web frontend and driver app call the backend API; changing their UI does not require changing backend code unless the API contract also changes. The web frontend is independently served from `frontend/`, and the backend does not serve frontend files.
 
 ## What's Working
 
@@ -39,7 +33,7 @@ The interactive API documentation is available at `/docs` when the backend is ru
 
 ### Admin Dashboard
 
-The browser dashboard is served from `backend/static/` at `/`. It uses Leaflet and OpenStreetMap tiles to show drivers with known coordinates, a driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. Admins can create drivers from the dashboard; the new driver's token is shown once and must be given to the driver then. The dashboard receives WebSocket updates and refreshes the driver list periodically. Dashboard access uses per-admin email/password accounts and an eight-hour HTTP-only session cookie.
+The standalone browser dashboard lives in `frontend/`. It uses HTML, CSS, vanilla JavaScript, Leaflet, and OpenStreetMap tiles to show drivers with known coordinates, a driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. Admins can create drivers from the dashboard; the new driver's token is shown once and must be given to the driver then. The dashboard receives WebSocket updates and refreshes the driver list periodically. Dashboard access uses per-admin email/password accounts and an eight-hour HTTP-only session cookie. Its API address is configured independently in `frontend/src/config.js`.
 
 ### Driver App
 
@@ -59,21 +53,24 @@ The browser dashboard is served from `backend/static/` at `/`. It uses Leaflet a
 ## Tech Stack
 
 - Backend: Python, FastAPI, Pydantic Settings, SQLAlchemy 2.0 async, Alembic, PostgreSQL.
-- Dashboard: vanilla JavaScript, Leaflet 1.9.4, OpenStreetMap tiles.
-- Driver app: React Native 0.87, TypeScript, React Navigation, AsyncStorage, `react-native-geolocation-service`.
+- Web frontend: HTML, CSS, vanilla JavaScript, Leaflet 1.9.4, OpenStreetMap tiles.
+- Android/iOS driver app: React Native 0.87, TypeScript, React Navigation, AsyncStorage, `react-native-geolocation-service`.
 - Live updates: FastAPI WebSockets.
 
 ## Project Structure
 
 ```text
 .
-├── backend/                 FastAPI service, PostgreSQL migrations, test-driver helper, dashboard assets
-├── DriverApp/               React Native driver app, Android/iOS projects, and technical decisions
-│   └── docs/
-│       └── TECHNICAL_DECISIONS.md
-├── docs/                    Repository-level contribution and branch documentation
-│   └── GIT_BRANCH_MAP.md
-└── README.md                Project overview and local setup
+├── backend/                 Python API, database models/migrations, scripts, and tests
+├── frontend/                Standalone admin web frontend (HTML, CSS, JavaScript)
+│   ├── index.html
+│   └── src/                 styles.css, app.js, and API URL config.js
+├── DriverApp/               React Native mobile app (TypeScript)
+│   ├── android/             Android native project
+│   ├── ios/                 iOS native project
+│   └── src/                 Mobile screens, API client, and location tracking
+├── docs/                    Repository documentation
+└── README.md
 ```
 
 ## Run Locally
@@ -97,6 +94,7 @@ Set-Location .\backend
 $env:POSTGRES_PASSWORD = " abc"
 $env:DATABASE_URL = "postgresql+asyncpg://fleet_tracker:%20abc@localhost:5432/fleet_tracker"
 $env:APP_ENV = "development"
+$env:WEB_ORIGINS = "http://localhost:5173"
 docker compose up -d postgres
 alembic upgrade head
 python -m scripts.seed_default_center
@@ -105,17 +103,28 @@ python -m scripts.seed_admin --email admin@example.com
 
 See [backend/README.md](backend/README.md) for the local PostgreSQL credentials and explanation of the URL-encoded leading space in the password.
 
-Start the service:
+Start the API service:
 
 ```powershell
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-The dashboard is served at [http://localhost:8000/](http://localhost:8000/) and the interactive API docs at [http://localhost:8000/docs](http://localhost:8000/docs). Keep the backend running in this terminal. PostgreSQL data persists in the Compose named volume.
+The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs). Keep the backend running in this terminal. PostgreSQL data persists in the Compose named volume.
 
-### 2. Create a test driver
+### 2. Run the web frontend independently
 
-In `/docs`, use `POST /admin/login` with the seeded admin email and password, then open `POST /admin/drivers` and submit a JSON body such as:
+In a separate PowerShell terminal, serve the static frontend:
+
+```powershell
+Set-Location .\frontend
+python -m http.server 5173 --bind localhost
+```
+
+Open [http://localhost:5173/](http://localhost:5173/). The Python command above only serves static files; the dashboard itself runs in the browser and is not Python. It calls the backend at `http://localhost:8000`, as configured in `frontend/src/config.js`. If you change the frontend origin or API address, update the API URL and set `WEB_ORIGINS` for the backend to the exact frontend origin (comma-separated if there are multiple). The backend allows only configured web origins for credentialed HTTP requests and WebSocket connections. In production, keep the frontend and API on the same site: admin sessions use `SameSite=Strict` cookies.
+
+### 3. Create a test driver
+
+In the backend's `/docs`, use `POST /admin/login` with the seeded admin email and password, then open `POST /admin/drivers` and submit a JSON body such as:
 
 ```json
 {
@@ -126,7 +135,7 @@ In `/docs`, use `POST /admin/login` with the seeded admin email and password, th
 
 Copy the returned `token` into the driver app.
 
-### 3. Run the driver app on Android
+### 4. Run the driver app on Android
 
 In one terminal:
 

@@ -1,4 +1,4 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+The Fleet Tracker driver app is the mobile frontend, built with React Native and TypeScript. `src/` contains its screens, API client, and location tracking code; `android/` and `ios/` contain the native platform projects. It communicates with the separate Python FastAPI backend. Mobile UI changes belong here; backend changes are needed only when the API contract or server behavior changes. See the repository root README for backend and database setup.
 
 # Getting Started
 

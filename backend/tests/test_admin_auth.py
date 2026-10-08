@@ -108,6 +108,35 @@ def test_missing_or_invalid_environment_defaults_to_production(monkeypatch):
     assert loaded_settings.app_env == "production"
 
 
+def test_frontend_origin_gets_credentialed_cors_access():
+    with TestClient(main.app) as client:
+        response = client.options(
+            "/admin/me",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_unconfigured_origin_does_not_get_cors_access():
+    with TestClient(main.app) as client:
+        response = client.options(
+            "/admin/me",
+            headers={
+                "Origin": "https://attacker.example",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert "access-control-allow-origin" not in response.headers
+
+
 @pytest.mark.parametrize(
     ("method", "path", "json"),
     [
@@ -531,8 +560,9 @@ def test_websocket_rejects_missing_session(monkeypatch):
     assert disconnect.value.code == 1008
 
 
+@pytest.mark.parametrize("origin", ["http://testserver", "http://localhost:5173"])
 @pytest.mark.usefixtures("mock_db")
-def test_websocket_accepts_valid_session_cookie(monkeypatch, mock_db):
+def test_websocket_accepts_valid_session_cookie(monkeypatch, mock_db, origin):
     set_app_env(monkeypatch, "development")
     token = "session-token"
     admin = make_admin()
@@ -551,7 +581,7 @@ def test_websocket_accepts_valid_session_cookie(monkeypatch, mock_db):
         client.cookies.set(main.ADMIN_SESSION_COOKIE, token)
         with client.websocket_connect(
             "/ws",
-            headers={"origin": "http://testserver"},
+            headers={"origin": origin},
         ):
             assert list(main.clients.values()) == [admin.center_id]
 

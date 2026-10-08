@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fleet Tracker</title>
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"
+    crossorigin=""
+  />
+  <link rel="stylesheet" href="./src/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="map"></div>
+
+    <div class="topbar">
+      <div class="topbar-inner">
+        <div class="counter online"><span class="dot"></span><strong id="counter-online">0</strong></div>
+        <div class="counter stale"><span class="dot"></span><strong id="counter-stale">0</strong></div>
+        <div class="counter offline"><span class="dot"></span><strong id="counter-offline">0</strong></div>
+        <div class="live-indicator">
+          <span id="live-dot" class="live-dot reconnect"></span>
+          <span id="live-text">Reconnecting</span>
+        </div>
+      </div>
+    </div>
+
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <strong>Drivers</strong>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="collapseBtn" class="sidebar-toggle" type="button" aria-label="Collapse sidebar">☰</button>
+          <button id="logoutBtn" class="btn secondary" type="button">Log out</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="search-wrap">
+          <input id="searchInput" type="text" placeholder="Search driver" aria-label="Search driver" />
+        </div>
+        <button id="newDriverBtn" class="btn" type="button">New driver</button>
+        <button id="fitBtn" class="btn" type="button">Fit all</button>
+      </div>
+      <div id="driverList" class="list"></div>
+    </aside>
+
+    <div id="newDriverOverlay" class="dialog-overlay" hidden>
+      <form id="newDriverForm" class="dialog-box" role="dialog" aria-modal="true" aria-labelledby="newDriverTitle">
+        <h2 id="newDriverTitle">New driver</h2>
+        <label for="newDriverName">Name</label>
+        <input id="newDriverName" name="name" type="text" minlength="1" maxlength="100" required />
+        <label for="newDriverPhone">Phone</label>
+        <input id="newDriverPhone" name="phone" type="tel" minlength="5" maxlength="20" required />
+        <div id="newDriverError" class="error" role="alert" aria-live="polite"></div>
+        <div class="dialog-actions">
+          <button id="cancelNewDriverBtn" class="btn secondary" type="button">Cancel</button>
+          <button id="submitNewDriverBtn" class="btn" type="submit">Create driver</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="driverTokenOverlay" class="dialog-overlay" hidden>
+      <div class="dialog-box" role="dialog" aria-modal="true" aria-labelledby="createdDriverName">
+        <h2 id="createdDriverName"></h2>
+        <p class="token-warning">This token is shown only once. Give it to the driver now.</p>
+        <code id="createdDriverToken" class="token-value"></code>
+        <div id="copyTokenStatus" class="error" role="status" aria-live="polite"></div>
+        <div id="listRefreshError" class="error" role="status" aria-live="polite"></div>
+        <div class="dialog-actions">
+          <button id="copyTokenBtn" class="btn secondary" type="button">Copy</button>
+          <button id="closeTokenDialogBtn" class="btn" type="button">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="loginOverlay" class="login-overlay">
+      <form id="loginForm" class="login-box">
+        <h2>Fleet Tracker</h2>
+        <label for="adminEmailInput">Email</label>
+        <input id="adminEmailInput" name="email" type="email" maxlength="255" autocomplete="username" required />
+        <label for="adminPasswordInput">Password</label>
+        <input id="adminPasswordInput" name="password" type="password" maxlength="128" autocomplete="current-password" required />
+        <div id="loginError" class="error" role="alert" aria-live="polite"></div>
+        <button id="loginBtn" type="submit">Log in</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" crossorigin=""></script>
+  <script src="./src/config.js"></script>
+  <script src="./src/app.js"></script>
+</body>
+</html>

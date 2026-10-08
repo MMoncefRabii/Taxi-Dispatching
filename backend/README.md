@@ -26,6 +26,7 @@ Set-Location .\backend
 $env:POSTGRES_PASSWORD = " abc"
 $env:DATABASE_URL = "postgresql+asyncpg://fleet_tracker:%20abc@localhost:5432/fleet_tracker"
 $env:APP_ENV = "development"
+$env:WEB_ORIGINS = "http://localhost:5173"
 docker compose up -d postgres
 python -m scripts.seed_default_center
 python -m scripts.seed_admin --email admin@example.com
@@ -42,6 +43,6 @@ python -m scripts.deactivate_admin --email admin@example.com
 
 Deactivation marks the admin inactive, records the UTC deactivation time, and revokes its non-revoked sessions in one transaction. It refuses to deactivate the last active admin of a center. Re-running it for an already inactive admin makes no changes. Both admin seed and deactivation commands leave existing rows in place.
 
-The default-center seed creates a center only when none exists.
+The default-center seed creates a center only when none exists. `WEB_ORIGINS` is a comma-separated allowlist used by the API for the separate admin frontend; for the default local frontend, set it to `http://localhost:5173`.
 
-Keep the backend command running in that terminal. The dashboard is at [http://localhost:8000/](http://localhost:8000/) and the API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs).
+Keep the backend command running in that terminal. The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs). The independent web frontend is served separately from the repository's `frontend/` directory; follow the frontend instructions in the root README.

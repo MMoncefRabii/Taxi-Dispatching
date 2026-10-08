@@ -7,6 +7,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(case_sensitive=False)
     database_url: str = Field(validation_alias="DATABASE_URL")
+    web_origins: str = Field(
+        default="http://localhost:5173",
+        validation_alias="WEB_ORIGINS",
+    )
     app_env: Literal["development", "production"] = Field(
         default="production",
         validation_alias="APP_ENV",
@@ -18,6 +22,14 @@ class Settings(BaseSettings):
         if isinstance(value, str) and value.lower() in {"development", "production"}:
             return value.lower()
         return "production"
+
+    @property
+    def allowed_web_origins(self) -> list[str]:
+        return [
+            origin.strip()
+            for origin in self.web_origins.split(",")
+            if origin.strip()
+        ]
 
     @property
     def async_database_url(self) -> str:
