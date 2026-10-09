@@ -28,6 +28,7 @@
       <nav class="navigation">
         <button class="navigation-link selected" type="button" data-section="centers">Centers</button>
         <button class="navigation-link" type="button" data-section="audit">Audit log</button>
+        <button id="devTasksNavButton" class="navigation-link" type="button" data-section="devTasks" hidden>Dev tasks</button>
       </nav>
       <div class="sidebar-footer">
         <span id="ownerEmail" class="owner-email"></span>
@@ -122,6 +123,17 @@
           </div>
           <p id="auditEmpty" class="empty-state" hidden>No audit events are available.</p>
         </section>
+      </section>
+
+      <section id="devTasksSection" class="content-section" aria-labelledby="devTasksTitle" hidden>
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">Local development</p>
+            <h1 id="devTasksTitle">Dev tasks</h1>
+          </div>
+        </header>
+        <p class="dev-tools-banner" role="status">DEV TOOLS ENABLED</p>
+        <div id="devTaskCards" class="dev-task-grid"></div>
       </section>
     </main>
   </div>

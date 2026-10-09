@@ -12,10 +12,18 @@
   const auditTableBody = document.getElementById('auditTableBody');
   const auditEmpty = document.getElementById('auditEmpty');
   const ownerEmail = document.getElementById('ownerEmail');
+  const devTasksNavButton = document.getElementById('devTasksNavButton');
+  const devTaskCards = document.getElementById('devTaskCards');
   const sections = {
     centers: document.getElementById('centersSection'),
     audit: document.getElementById('auditSection'),
+    devTasks: document.getElementById('devTasksSection'),
   };
+  const devTasks = new Map();
+  const devTaskDefinitions = new Map();
+  const devRuns = new Map();
+  let devTaskPoller = null;
+  let pollingDevRuns = false;
 
   class ApiError extends Error {
     constructor(status, message) {
@@ -58,6 +66,11 @@
   }
 
   function showLogin(message = '') {
+    if (devTaskPoller !== null) {
+      clearInterval(devTaskPoller);
+      devTaskPoller = null;
+    }
+    devRuns.clear();
     consoleView.hidden = true;
     loginView.hidden = false;
     setMessage(loginMessage, message);
@@ -126,10 +139,262 @@
     auditEmpty.hidden = events.length !== 0;
   }
 
+  function latestRunForTask(taskId) {
+    return [...devRuns.values()].reverse().find((run) => run.task_id === taskId);
+  }
+
+  function activeRunForTask(taskId) {
+    return [...devRuns.values()].reverse().find(
+      (run) => run.task_id === taskId && run.status === 'running',
+    );
+  }
+
+  function formatDuration(seconds) {
+    return typeof seconds === 'number' && Number.isFinite(seconds)
+      ? `${seconds.toFixed(1)} s`
+      : '—';
+  }
+
+  function refreshDevTaskCard(task) {
+    const cardElements = devTasks.get(task.id);
+    if (!cardElements) return;
+    try {
+      const run = latestRunForTask(task.id);
+      const activeRun = activeRunForTask(task.id);
+      if (task.kind === 'service') {
+        cardElements.badge.textContent = activeRun ? 'Running' : 'Stopped';
+        cardElements.badge.className = `dev-task-status ${activeRun ? 'running' : ''}`;
+        cardElements.resultStatus.textContent = run ? run.status : 'Ready';
+        cardElements.resultStatus.className = `dev-task-status ${run ? run.status : ''}`;
+        cardElements.button.textContent = activeRun ? 'Stop' : 'Start';
+        cardElements.button.disabled = false;
+      } else {
+        cardElements.badge.textContent = run ? run.status : 'Ready';
+        cardElements.badge.className = `dev-task-status ${run ? run.status : ''}`;
+        cardElements.resultStatus.textContent = '';
+        cardElements.button.textContent = activeRun ? 'Running' : 'Run';
+        cardElements.button.disabled = Boolean(activeRun);
+      }
+      cardElements.duration.textContent = run
+        ? `Duration: ${formatDuration(run.duration_seconds)}`
+        : 'Duration: —';
+      cardElements.error.hidden = true;
+      cardElements.error.textContent = '';
+    } catch {
+      cardElements.error.textContent = 'This task card could not be updated. Reload the console and try again.';
+      cardElements.error.hidden = false;
+    }
+  }
+
+  function createDevTaskCardError(task) {
+    const errorCard = document.createElement('article');
+    errorCard.className = 'dev-task-card';
+    const title = document.createElement('h2');
+    title.textContent = task.label || 'Development task';
+    const message = document.createElement('p');
+    message.className = 'message';
+    message.textContent = 'This task card could not be displayed. Reload the console and try again.';
+    errorCard.append(title, message);
+    return errorCard;
+  }
+
+  function makeDevTaskCard(task) {
+    const card = document.createElement('article');
+    card.className = 'dev-task-card';
+    const heading = document.createElement('div');
+    heading.className = 'dev-task-heading';
+    const title = document.createElement('h2');
+    title.textContent = task.label;
+    const badge = document.createElement('span');
+    badge.className = 'dev-task-status';
+    const resultStatus = document.createElement('span');
+    resultStatus.className = 'dev-task-status';
+    heading.append(title, badge, resultStatus);
+
+    const description = document.createElement('p');
+    description.className = 'dev-task-description';
+    description.textContent = task.description;
+
+    const controls = document.createElement('div');
+    controls.className = 'dev-task-controls';
+    const parameterInputs = new Map();
+    for (const parameter of task.parameters || []) {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.name = parameter.name;
+      input.placeholder = parameter.description;
+      input.setAttribute('aria-label', parameter.description);
+      input.pattern = parameter.pattern;
+      controls.append(input);
+      parameterInputs.set(parameter.name, input);
+    }
+    const button = document.createElement('button');
+    button.className = 'button primary';
+    button.type = 'button';
+    controls.append(button);
+    const duration = document.createElement('span');
+    duration.className = 'dev-task-meta';
+    const log = document.createElement('pre');
+    log.className = 'dev-task-log';
+    log.setAttribute('aria-label', `${task.label} output`);
+    log.textContent = '';
+    const error = document.createElement('p');
+    error.className = 'message';
+    error.hidden = true;
+    card.append(heading, description, controls, duration, error, log);
+    const elements = {
+      badge,
+      button,
+      duration,
+      error,
+      log,
+      parameterInputs,
+      resultStatus,
+    };
+    devTasks.set(task.id, elements);
+
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      setMessage(consoleMessage, '');
+      try {
+        const activeRun = activeRunForTask(task.id);
+        let response;
+        if (task.kind === 'service' && activeRun) {
+          response = await request(`dev/runs/${encodeURIComponent(activeRun.id)}/stop`, {
+            method: 'POST',
+          });
+        } else {
+          const parameters = {};
+          for (const [name, input] of parameterInputs) {
+            if (input.value) parameters[name] = input.value;
+          }
+          response = await request(`dev/tasks/${encodeURIComponent(task.id)}/run`, {
+            method: 'POST',
+            body: JSON.stringify(parameters),
+          });
+          response.outputLines = [];
+          response.outputOffset = 0;
+          response.output_line_count = 0;
+          devRuns.set(response.id, response);
+          elements.log.textContent = '';
+        }
+        if (task.kind === 'service' && activeRun) {
+          Object.assign(activeRun, response);
+        }
+        if (response && response.id) devRuns.set(response.id, response);
+        refreshDevTaskCard(task);
+        ensureDevTaskPolling();
+        await pollDevTaskRuns();
+      } catch (error) {
+        button.disabled = false;
+        if (!handleUnauthorized(error)) {
+          setMessage(
+            consoleMessage,
+            error instanceof ApiError
+              ? error.message
+              : 'Could not update this task card. Reload the console and try again.',
+          );
+        }
+      }
+    });
+
+    refreshDevTaskCard(task);
+    return card;
+  }
+
+  function ensureDevTaskPolling() {
+    const needsPolling = [...devRuns.values()].some(
+      (run) => run.status === 'running' || (run.outputOffset || 0) < (run.output_line_count || 0),
+    );
+    if (needsPolling && devTaskPoller === null) {
+      devTaskPoller = setInterval(pollDevTaskRuns, 1000);
+    } else if (!needsPolling && devTaskPoller !== null) {
+      clearInterval(devTaskPoller);
+      devTaskPoller = null;
+    }
+  }
+
+  async function pollDevTaskRuns() {
+    if (pollingDevRuns) return;
+    pollingDevRuns = true;
+    try {
+      for (const run of devRuns.values()) {
+        if (
+          run.status !== 'running'
+          && (run.outputOffset || 0) >= (run.output_line_count || 0)
+        ) continue;
+        const output = await request(
+          `dev/runs/${encodeURIComponent(run.id)}?offset=${run.outputOffset || 0}`,
+        );
+        run.outputOffset = output.offset;
+        run.output_line_count = output.offset;
+        run.outputLines = [...(run.outputLines || []), ...output.lines].slice(-500);
+        run.status = output.status;
+        run.service_state = output.service_state;
+        run.duration_seconds = output.duration_seconds;
+        const task = devTaskDefinitions.get(run.task_id);
+        if (task) {
+          const cardElements = devTasks.get(task.id);
+          if (cardElements) {
+            try {
+              cardElements.log.textContent = run.outputLines.join('\n');
+            } catch {
+              cardElements.error.textContent = 'This task output could not be displayed. Reload the console and try again.';
+              cardElements.error.hidden = false;
+            }
+          }
+          refreshDevTaskCard(task);
+        }
+      }
+    } catch (error) {
+      if (!handleUnauthorized(error)) {
+        setMessage(consoleMessage, error.message || 'Could not refresh task output.');
+      }
+    } finally {
+      pollingDevRuns = false;
+      ensureDevTaskPolling();
+    }
+  }
+
+  async function loadDevTasks() {
+    let tasks;
+    try {
+      tasks = await request('dev/tasks');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        devTasksNavButton.hidden = true;
+        sections.devTasks.hidden = true;
+        return;
+      }
+      throw error;
+    }
+    devTasksNavButton.hidden = false;
+    devTaskCards.replaceChildren();
+    devTasks.clear();
+    devTaskDefinitions.clear();
+    devRuns.clear();
+    for (const task of tasks) {
+      devTaskDefinitions.set(task.id, task);
+      try {
+        devTaskCards.append(makeDevTaskCard(task));
+      } catch {
+        devTaskCards.append(createDevTaskCardError(task));
+      }
+    }
+    const result = await request('dev/runs?limit=50');
+    for (const run of [...result.runs].reverse()) {
+      run.outputLines = [];
+      run.outputOffset = 0;
+      devRuns.set(run.id, run);
+    }
+    for (const task of tasks) refreshDevTaskCard(task);
+    ensureDevTaskPolling();
+  }
+
   async function loadConsole(email) {
     showConsole(email);
     try {
-      await Promise.all([loadCenters(), loadAudit()]);
+      await Promise.all([loadCenters(), loadAudit(), loadDevTasks()]);
     } catch (error) {
       if (!handleUnauthorized(error)) {
         setMessage(consoleMessage, error.message || 'Could not load console data.');
@@ -215,6 +480,8 @@
             setMessage(consoleMessage, error.message || 'Could not load the audit log.');
           }
         }
+      } else if (selected === 'devTasks') {
+        await pollDevTaskRuns();
       }
     });
   });
