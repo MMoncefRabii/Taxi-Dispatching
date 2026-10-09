@@ -21,6 +21,7 @@ def record_platform_event(
     super_admin_id: UUID | None = None,
     target_id: UUID | None = None,
     email_hash: str | None = None,
+    user_agent: str | None = None,
 ) -> PlatformAuditLog:
     row = PlatformAuditLog(
         super_admin_id=super_admin_id,
@@ -28,7 +29,11 @@ def record_platform_event(
         target_type=target_type,
         target_id=target_id,
         ip=request.client.host if request.client is not None else None,
-        user_agent=request.headers.get("user-agent", "")[:200],
+        user_agent=(
+            request.headers.get("user-agent", "")[:200]
+            if user_agent is None
+            else user_agent[:200]
+        ),
         success=success,
         email_hash=email_hash,
     )

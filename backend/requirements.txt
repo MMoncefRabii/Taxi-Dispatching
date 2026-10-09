@@ -4,6 +4,7 @@ sqlalchemy[asyncio]>=2.0,<3
 asyncpg
 alembic
 pydantic-settings
+python-dotenv==1.2.4
 argon2-cffi==25.1.0
 tzdata==2026.5
 requests

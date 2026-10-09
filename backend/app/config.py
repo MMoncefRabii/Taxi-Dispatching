@@ -1,15 +1,26 @@
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(case_sensitive=False)
+    model_config = SettingsConfigDict(
+        case_sensitive=False,
+        env_file=BACKEND_DIR / ".env",
+        env_file_encoding="utf-8",
+    )
     database_url: str = Field(validation_alias="DATABASE_URL")
     web_origins: str = Field(
         default="http://localhost:5173",
         validation_alias="WEB_ORIGINS",
+    )
+    dev_tasks_enabled: bool = Field(
+        default=False,
+        validation_alias="DEV_TASKS_ENABLED",
     )
     app_env: Literal["development", "production"] = Field(
         default="production",

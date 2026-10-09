@@ -22,6 +22,8 @@ Platform-owner login uses a separate four-hour HTTP-only `platform_session` cook
 
 From the repository root, activate the project venv, then change into `backend/`. Set `DATABASE_URL` to the PostgreSQL database where the center and admin should be created. The seed scripts support both module invocations from `backend/` and direct script invocations.
 
+The backend also loads settings from `backend/.env` automatically; real environment variables take precedence. Start the backend from the repository root with `.\start-backend.ps1`. To use the checked-in placeholders as a starting point, copy `.env.example` to `backend\.env` and set local values there. Password spaces inside `DATABASE_URL` must be URL-encoded; for example, a leading space is `%20`.
+
 ```powershell
 .\.venv\Scripts\Activate.ps1
 Set-Location .\backend
@@ -56,3 +58,5 @@ Deactivation marks the admin inactive, records the UTC deactivation time, and re
 The default-center seed creates a center only when none exists. `WEB_ORIGINS` is a comma-separated allowlist used by the API for the separate admin frontend; for the default local frontend, set it to `http://localhost:5173`.
 
 Keep the backend command running in that terminal. The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs). The independent web frontend is served separately from the repository's `frontend/` directory; follow the frontend instructions in the root README.
+
+The platform console can expose the allowlisted local development tasks when `DEV_TASKS_ENABLED=true` and `APP_ENV=development`. This is disabled by default, is refused in production, and starts no backend process. Use it only for local development; see the frontend README for the available console tasks.

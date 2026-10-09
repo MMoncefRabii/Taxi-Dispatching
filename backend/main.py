@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import logging
 import secrets
 import time
 import uuid
@@ -61,20 +62,49 @@ def _as_utc_datetime(timestamp: float) -> datetime:
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    yield
-    await engine.dispose()
+async def lifespan(application: FastAPI):
+    task_manager = None
+    if settings.dev_tasks_enabled:
+        logging.getLogger(__name__).warning(
+            "DEV_TASKS_ENABLED is on; development task controls are available."
+        )
+        if settings.app_env == "production":
+            raise RuntimeError("DEV_TASKS_ENABLED cannot be used in production.")
+        from app.platform.devtasks.runner import DevTaskManager
+
+        task_manager = DevTaskManager()
+        application.state.dev_task_manager = task_manager
+    try:
+        yield
+    finally:
+        try:
+            if task_manager is not None:
+                await task_manager.shutdown()
+        finally:
+            await engine.dispose()
 
 
-app = FastAPI(title="Fleet Tracker", lifespan=lifespan)
-app.add_middleware(
-    ExplicitOriginCORSMiddleware,
-    allow_origins=settings.allowed_web_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-Token"],
-)
-app.include_router(platform_router)
+def create_app() -> FastAPI:
+    application = FastAPI(title="Fleet Tracker", lifespan=lifespan)
+    application.add_middleware(
+        ExplicitOriginCORSMiddleware,
+        allow_origins=settings.allowed_web_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "X-Token"],
+    )
+    application.include_router(platform_router)
+    if settings.dev_tasks_enabled:
+        from app.platform.devtasks.router import router as devtasks_router
+
+        application.include_router(devtasks_router)
+    return application
+
+
+app = create_app()
+# TODO: Remove DEV_TASKS_ENABLED from Settings and .env.example, delete this package and
+# its tests, remove this conditional router/lifespan guard and the audit user-agent option,
+# and remove the console markup, styles, client logic, and related README sections.
 clients: dict[WebSocket, uuid.UUID] = {}
 
 
