@@ -5,4 +5,5 @@ asyncpg
 alembic
 pydantic-settings
 argon2-cffi==25.1.0
+tzdata==2026.5
 requests

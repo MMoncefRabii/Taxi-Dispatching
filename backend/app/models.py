@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint, func, true
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -39,6 +39,17 @@ class SuperAdmin(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
+    sessions: Mapped[list[PlatformSession]] = relationship(back_populates="super_admin")
+
+
+Index(
+    "uq_super_admin_email_lower",
+    func.lower(SuperAdmin.email),
+    unique=True,
+)
 
 
 class Admin(Base):
@@ -74,6 +85,51 @@ class AdminSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     admin: Mapped[Admin] = relationship(back_populates="sessions")
+
+
+class PlatformSession(Base):
+    __tablename__ = "platform_sessions"
+    __table_args__ = (
+        Index("ix_platform_sessions_token_hash", "token_hash", unique=True),
+        Index("ix_platform_sessions_super_admin_id", "super_admin_id"),
+    )
+    id: Mapped[uuid.UUID] = uuid_pk()
+    super_admin_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("super_admins.id"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    super_admin: Mapped[SuperAdmin] = relationship(back_populates="sessions")
+
+
+class PlatformAuditLog(Base):
+    __tablename__ = "platform_audit_log"
+    __table_args__ = (
+        Index("ix_platform_audit_log_created_at", "created_at"),
+        Index("ix_platform_audit_log_super_admin_id", "super_admin_id"),
+    )
+    id: Mapped[uuid.UUID] = uuid_pk()
+    super_admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("super_admins.id"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    target_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    ip: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    email_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class AuditLog(Base):

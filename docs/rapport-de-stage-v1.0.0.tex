@@ -1,0 +1,607 @@
+\documentclass[11pt,a4paper,oneside]{report}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{pdflscape}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,calc}
+
+\geometry{margin=2.4cm}
+\setlength{\headheight}{14pt}
+\setlist[itemize]{leftmargin=1.5em,itemsep=0.3em,topsep=0.4em}
+\definecolor{fleetgreen}{HTML}{215B3C}
+\definecolor{fleetblue}{HTML}{315B76}
+\definecolor{fleetlight}{HTML}{EFF5F1}
+\definecolor{fleetgray}{HTML}{58645D}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=fleetgreen,
+  urlcolor=fleetblue,
+  pdftitle={Rapport de stage -- Fleet Tracker -- Version 1.0.0},
+  pdfsubject={Présentation fonctionnelle et architecturale de Fleet Tracker}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small Fleet Tracker}
+\rhead{\small Rapport de stage -- Version 1.0.0}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\newcommand{\important}[1]{\textcolor{fleetgreen}{\textbf{#1}}}
+\newcommand{\entity}[1]{\textbf{#1}}
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  \vspace*{2.2cm}
+  {\Large\scshape Rapport de stage\par}
+  \vspace{0.7cm}
+  {\Huge\bfseries\color{fleetgreen} Fleet Tracker\par}
+  \vspace{0.5cm}
+  {\Large Système de suivi de flotte de taxis\par}
+  \vspace{1.3cm}
+  {\large Présentation du besoin, de la solution et de son architecture\par}
+  \vfill
+  \begin{tikzpicture}
+    \draw[fleetgreen,line width=1.5pt] (0,0) -- (10,0);
+    \fill[fleetgreen] (5,0) circle (0.12);
+  \end{tikzpicture}
+  \vfill
+  {\large Version 1.0.0\par}
+  \vspace{0.25cm}
+  {\large 9 octobre 2026\par}
+  \vspace*{1.4cm}
+\end{titlepage}
+
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+\chapter*{Résumé}
+\addcontentsline{toc}{chapter}{Résumé}
+
+Fleet Tracker est une solution de suivi de taxis conçue pour donner à un
+responsable de flotte une vue actualisée de ses chauffeurs et de leurs
+positions. Le chauffeur partage sa localisation depuis une application mobile ;
+un tableau de bord web présente les conducteurs sur une carte et signale leur
+état de disponibilité. Une console distincte permet à un responsable de la
+plateforme de consulter et de créer des centres.
+
+Le système repose sur trois interfaces clientes, une API centrale et une base
+de données relationnelle. Le projet constitue un socle de suivi opérationnel
+pour une première mise en œuvre en Tunisie, avec un pilote envisagé dans le
+Grand Tunis. Il ne comprend pas encore la répartition des courses, la gestion
+des commandes ou les fonctions d'un progiciel de gestion intégré.
+
+\chapter{Introduction et contexte}
+
+\section{Présentation du projet}
+
+Le secteur du taxi s'appuie sur des chauffeurs mobiles et des responsables qui
+doivent pouvoir vérifier la disponibilité des véhicules et leur position. Le
+projet Fleet Tracker répond à ce besoin au moyen d'une application chauffeur,
+d'un tableau de bord d'administration et d'un service central de traitement.
+Les différentes interfaces communiquent avec ce service plutôt que de partager
+directement leurs données entre elles.
+
+La solution est pensée pour plusieurs centres. Les chauffeurs et les
+administrateurs sont rattachés à un centre, ce qui permet à chaque responsable
+de consulter les données de son périmètre. Une console de plateforme distincte
+est destinée à la gestion transversale des centres et à la consultation du
+journal des événements de cette console.
+
+\section{Problématique}
+
+Sans outil commun de géolocalisation, le suivi d'une flotte repose facilement
+sur des échanges ponctuels et des informations qui ne sont pas visibles au
+même endroit. Le responsable peut alors manquer de visibilité sur les
+chauffeurs disponibles, leur dernière position connue ou l'actualité de
+l'information reçue.
+
+\medskip
+\noindent\textbf{Problématique retenue :} comment fournir au responsable d'un
+centre une vision simple et suffisamment récente de l'activité et des positions
+de ses chauffeurs, tout en donnant à ces derniers un moyen direct de signaler
+leur disponibilité ?
+
+\section{Besoins auxquels répond la solution}
+
+\begin{itemize}
+  \item permettre au chauffeur de saisir son accès, d'autoriser la localisation
+        et de passer en ligne ou hors ligne ;
+  \item transmettre périodiquement une position géographique quand le suivi est
+        actif ;
+  \item donner à l'administrateur une carte, une liste de chauffeurs et des
+        indicateurs de fraîcheur et de disponibilité ;
+  \item actualiser l'affichage lors de la réception de nouveaux événements,
+        sans dépendre uniquement d'une consultation manuelle ;
+  \item permettre la création de fiches chauffeur depuis le tableau de bord ;
+  \item séparer les données et les accès selon le centre, et distinguer
+        l'administration d'un centre de l'administration de la plateforme.
+\end{itemize}
+
+\section{Objectifs et périmètre}
+
+L'objectif de la version actuelle est de fournir un \important{socle
+opérationnel de suivi GPS}. Le dépôt documente un échange réel entre une
+application mobile et le tableau de bord. La position est suivie lorsque
+l'application chauffeur est au premier plan ; l'envoi est réalisé à intervalle
+rapproché, nominalement autour de sept secondes, selon la disponibilité du
+service de localisation.
+
+Le périmètre actuel couvre la gestion des chauffeurs et centres, la disponibilité,
+l'enregistrement des positions et leur affichage en direct. La répartition des
+courses, la gestion complète des véhicules, la facturation, les flux de travail
+ERP, le suivi en arrière-plan et l'apprentissage automatique sont hors du
+périmètre livré à ce stade.
+
+\chapter{Solution fonctionnelle}
+
+\section{Acteurs et responsabilités}
+
+\begin{description}[style=nextline,leftmargin=3.5cm,labelwidth=3.2cm]
+  \item[Chauffeur] utilise l'application mobile, renseigne son jeton d'accès,
+        autorise la localisation et indique s'il est en service.
+  \item[Administrateur de centre] se connecte au tableau de bord de son centre,
+        suit l'état et la position des chauffeurs et peut créer une fiche
+        chauffeur.
+  \item[Responsable de plateforme] utilise une console séparée pour consulter
+        les centres, en créer un et consulter le journal d'audit de la
+        plateforme.
+\end{description}
+
+\section{Principaux parcours}
+
+\subsection{Suivi d'un chauffeur}
+
+Le chauffeur active son statut en ligne depuis l'application. Après
+l'autorisation du système mobile, l'application obtient des coordonnées et les
+transmet à l'API avec son identifiant d'accès. L'API vérifie l'accès, valide les
+valeurs reçues et écarte les positions dont la précision dépasse le seuil
+prévu. Les positions acceptées sont enregistrées puis diffusées au tableau de
+bord du centre concerné.
+
+Le tableau de bord met à jour la carte et les informations du chauffeur. Il
+distingue notamment l'état en ligne, l'état hors ligne et une position devenue
+ancienne. Une position récente est considérée comme en ligne par l'interface
+lorsqu'elle date de moins d'une minute et que le statut du chauffeur est actif.
+
+\subsection{Administration du centre}
+
+Après authentification, l'administrateur consulte la carte et la liste des
+chauffeurs de son centre. Il peut rechercher un chauffeur et créer une nouvelle
+fiche. Un jeton d'accès associé au chauffeur est présenté une seule fois au
+moment de sa création afin de pouvoir être transmis au chauffeur.
+
+\subsection{Administration de la plateforme}
+
+Le responsable de plateforme accède à une console distincte de celle des
+centres. Dans l'état documenté, elle permet de consulter la liste des centres
+et leurs principaux compteurs, d'ajouter un centre et de consulter le journal
+d'audit associé à la console.
+
+\section{Diagramme de cas d'utilisation}
+
+\begin{figure}[htbp]
+\centering
+\resizebox{0.96\linewidth}{!}{%
+\begin{tikzpicture}[
+  actorline/.style={draw=fleetgray,line width=0.8pt},
+  usecase/.style={draw=fleetblue,fill=blue!4,ellipse,minimum width=4.2cm,
+                  minimum height=0.85cm,align=center},
+  boundary/.style={draw=fleetgreen,line width=1pt,rounded corners=2mm}
+]
+  \draw[boundary] (2.1,-3.55) rectangle (11.4,4.15);
+  \node[anchor=north west,text=fleetgreen,font=\bfseries] at (2.35,3.98)
+    {Fleet Tracker};
+
+  \node[align=center] (driver) at (0,1.0) {\textbf{Chauffeur}};
+  \draw (0,2.45) circle (0.16);
+  \draw (0,2.29) -- (0,1.75);
+  \draw (0,2.12) -- (-0.22,1.91);
+  \draw (0,2.12) -- (0.22,1.91);
+  \draw (0,1.75) -- (-0.18,1.48);
+  \draw (0,1.75) -- (0.18,1.48);
+
+  \node[align=center] (admin) at (0,-0.2) {\textbf{Administrateur}\\\textbf{de centre}};
+  \draw (0,-0.58) circle (0.16);
+  \draw (0,-0.74) -- (0,-1.28);
+  \draw (0,-0.91) -- (-0.22,-1.12);
+  \draw (0,-0.91) -- (0.22,-1.12);
+  \draw (0,-1.28) -- (-0.18,-1.55);
+  \draw (0,-1.28) -- (0.18,-1.55);
+
+  \node[align=center] (owner) at (13.4,-3.25) {\textbf{Responsable de}\\\textbf{plateforme}};
+  \draw (13.4,-1.88) circle (0.16);
+  \draw (13.4,-2.04) -- (13.4,-2.58);
+  \draw (13.4,-2.21) -- (13.18,-2.42);
+  \draw (13.4,-2.21) -- (13.62,-2.42);
+  \draw (13.4,-2.58) -- (13.22,-2.85);
+  \draw (13.4,-2.58) -- (13.58,-2.85);
+
+  \node[usecase] (availability) at (5.05,2.75) {Indiquer sa disponibilité};
+  \node[usecase] (sendloc) at (8.8,2.75) {Transmettre sa position};
+  \node[usecase] (adminlogin) at (5.05,1.15) {S'authentifier au centre};
+  \node[usecase] (monitor) at (8.8,1.15) {Suivre les chauffeurs\\sur la carte et la liste};
+  \node[usecase] (create) at (5.05,-0.55) {Créer une fiche chauffeur};
+  \node[usecase] (ownerlogin) at (8.8,-0.55) {S'authentifier à la plateforme};
+  \node[usecase] (centers) at (5.05,-2.25) {Consulter et créer des centres};
+  \node[usecase] (audit) at (8.8,-2.25) {Consulter le journal d'audit};
+
+  \draw[actorline] (0.18,2.15) -- (availability.west);
+  \draw[actorline] (0.18,2.05) -- (sendloc.west);
+  \draw[actorline] (0.18,-0.55) -- (adminlogin.west);
+  \draw[actorline] (0.18,-0.65) -- (monitor.west);
+  \draw[actorline] (0.18,-0.75) -- (create.west);
+  \draw[actorline] (13.18,-2.05) -- (ownerlogin.east);
+  \draw[actorline] (13.18,-2.17) -- (centers.east);
+  \draw[actorline] (13.18,-2.30) -- (audit.east);
+\end{tikzpicture}%
+}
+\caption{Acteurs et fonctions principales du système.}
+\label{fig:use-cases}
+\end{figure}
+
+\chapter{Architecture du système}
+
+\section{Vue d'ensemble}
+
+L'architecture sépare les interfaces, le traitement métier et la persistance.
+L'application mobile et les deux interfaces web échangent avec un même backend.
+Celui-ci centralise les règles de validation, l'authentification, le filtrage
+des données par centre, l'enregistrement des positions et la diffusion des
+événements. PostgreSQL conserve les données relationnelles et l'historique des
+positions.
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  box/.style={draw=fleetblue,fill=blue!4,rounded corners=2mm,
+              text width=3.5cm,minimum height=1.15cm,align=center},
+  external/.style={draw=fleetgray,fill=gray!7,rounded corners=2mm,
+                   text width=2.8cm,minimum height=0.9cm,align=center},
+  flow/.style={-{Stealth[length=2.5mm]},draw=fleetgreen,line width=1pt},
+  returnflow/.style={-{Stealth[length=2.5mm]},draw=fleetblue,line width=1pt},
+  label/.style={font=\small,fill=white,inner sep=2pt,align=center}
+]
+  \node[box] (mobile) at (-5,2.3)
+    {\textbf{Application chauffeur}\\React Native / TypeScript};
+  \node[box] (dashboard) at (-5,-0.2)
+    {\textbf{Tableau de bord du centre}\\Navigateur, carte et liste};
+  \node[box] (platform) at (-5,-2.7)
+    {\textbf{Console de plateforme}\\Gestion des centres et audit};
+  \node[box,text width=4.4cm,minimum height=1.55cm] (api) at (1,0)
+    {\textbf{API centrale}\\FastAPI\\Validation, accès et diffusion temps réel};
+  \node[box] (db) at (7,1.5)
+    {\textbf{Base relationnelle}\\PostgreSQL};
+  \node[external] (tiles) at (7,-1.5)
+    {\textbf{Fond cartographique}\\Tuiles OpenStreetMap};
+  \node[external] (gps) at (-9,2.3)
+    {\textbf{Services de localisation}\\du téléphone};
+
+  \draw[flow] (gps) -- node[label,above] {Position} (mobile);
+  \draw[flow] (mobile.east) -- node[label,above] {Requêtes HTTP\\(statut et positions)} (api.west);
+  \draw[returnflow] (api.west) -- node[label,below] {Confirmation} (mobile.east);
+  \draw[flow] (dashboard.east) -- node[label,above] {HTTP : consultation\\et administration} (api.west);
+  \draw[returnflow] (api.west) -- node[label,below] {WebSocket :\\événements en direct} (dashboard.east);
+  \draw[flow] (platform.east) -- node[label,above] {HTTP : centres\\et audit} (api.west);
+  \draw[flow] (api.east) -- node[label,above] {Lecture et écriture\\asynchrones} (db.west);
+  \draw[flow] (dashboard.south east) -- node[label,below,sloped] {Chargement du fond\\de carte} (tiles.west);
+\end{tikzpicture}%
+}
+\caption{Architecture logique et principaux échanges.}
+\label{fig:architecture}
+\end{figure}
+
+\section{Composants}
+
+\begin{description}[style=nextline,leftmargin=3.6cm,labelwidth=3.3cm]
+  \item[Application chauffeur] application mobile Android et iOS. Elle gère
+        l'accès du chauffeur, le statut de service et l'envoi des positions
+        autorisées.
+  \item[Tableau de bord web] interface de supervision destinée aux
+        administrateurs de centre. Elle affiche une carte, des états
+        synthétiques, une liste et des fonctions de gestion des chauffeurs.
+  \item[Console de plateforme] interface web séparée pour les fonctions
+        transversales portant sur les centres et le journal d'audit.
+  \item[Backend] API centrale Python. Elle valide les requêtes, vérifie les
+        accès, applique le périmètre du centre, enregistre les données et
+        relaie les événements de suivi.
+  \item[Base de données] stockage relationnel PostgreSQL pour les comptes, les
+        centres, les chauffeurs, les positions et les journaux.
+  \item[Services externes] service de localisation du téléphone pour les
+        coordonnées, et tuiles OpenStreetMap comme fond de carte.
+\end{description}
+
+\section{Flux temps réel}
+
+Les opérations de gestion et de collecte utilisent une API HTTP. Lorsqu'une
+position acceptée est enregistrée, le backend peut diffuser un événement par
+WebSocket aux tableaux de bord authentifiés du même centre. Le navigateur met
+alors à jour la position sans attendre le prochain rafraîchissement complet.
+La liste reste également rechargeable afin de récupérer un état initial ou de
+se resynchroniser.
+
+\chapter{Données et modèle conceptuel}
+
+\section{Organisation des données}
+
+La base de données est organisée autour du centre, qui constitue le périmètre
+de gestion des chauffeurs, administrateurs et zones. Une position est liée à
+un chauffeur et à son centre ; les données sont horodatées afin de distinguer
+la dernière position de l'historique. Des tables séparées conservent les
+sessions d'administration et les événements d'audit.
+
+Le schéma ci-dessous est une représentation conceptuelle simplifiée du modèle
+présent dans le projet. Les clés primaires et étrangères sont indiquées par
+\textbf{PK} et \textbf{FK}. Les cardinalités décrivent les associations
+principales, sans détailler les contraintes et tous les champs de stockage.
+
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\resizebox{0.98\linewidth}{!}{%
+\begin{tikzpicture}[
+  entity/.style={draw=fleetblue,fill=blue!3,rounded corners=1mm,
+                 text width=2.8cm,minimum height=0.9cm,align=center,
+                 font=\small},
+  relation/.style={draw=fleetgray,line width=0.8pt},
+  relabel/.style={font=\scriptsize,fill=white,inner sep=1.5pt}
+]
+  \node[entity] (center) at (0,1.3)
+    {\textbf{Centre}\\Identifiant (PK)\\Nom, ville, fuseau horaire};
+  \node[entity] (admin) at (3.7,3.4)
+    {\textbf{Administrateur}\\Identifiant (PK)\\Centre (FK), courriel, état};
+  \node[entity] (driver) at (3.7,1.3)
+    {\textbf{Chauffeur}\\Identifiant (PK)\\Centre (FK), identité, statut};
+  \node[entity] (zone) at (3.7,-0.8)
+    {\textbf{Zone}\\Identifiant (PK)\\Centre (FK), nom, limites};
+  \node[entity] (adminsession) at (7.3,3.4)
+    {\textbf{Session admin}\\Identifiant (PK)\\Administrateur (FK), échéance};
+  \node[entity] (audit) at (7.3,1.3)
+    {\textbf{Journal du centre}\\Identifiant (PK)\\Centre et admin (FK), action};
+  \node[entity] (vehicle) at (7.3,-0.8)
+    {\textbf{Véhicule}\\Identifiant (PK)\\Chauffeur (FK), immatriculation};
+  \node[entity] (location) at (10.9,2.4)
+    {\textbf{Position chauffeur}\\Identifiant (PK)\\Chauffeur et centre (FK),\\coordonnées, date};
+  \node[entity] (statuslog) at (10.9,0.2)
+    {\textbf{Historique de statut}\\Identifiant (PK)\\Chauffeur (FK), statut, date};
+  \node[entity] (superadmin) at (14.5,3.4)
+    {\textbf{Responsable plateforme}\\Identifiant (PK)\\Courriel, état};
+  \node[entity] (platformsession) at (18.1,3.4)
+    {\textbf{Session plateforme}\\Identifiant (PK)\\Responsable (FK), échéance};
+  \node[entity] (platformaudit) at (18.1,1.0)
+    {\textbf{Journal plateforme}\\Identifiant (PK)\\Responsable (FK), événement};
+
+  \draw[relation] (center) -- node[relabel,above,sloped] {1 à plusieurs} (admin);
+  \draw[relation] (center) -- node[relabel,above] {1 à plusieurs} (driver);
+  \draw[relation] (center) -- node[relabel,below,sloped] {1 à plusieurs} (zone);
+  \draw[relation] (admin) -- node[relabel,above] {1 à plusieurs} (adminsession);
+  \draw[relation] (admin) -- node[relabel,above,sloped] {acteur} (audit);
+  \draw[relation] (driver) -- node[relabel,above,sloped] {0 ou 1} (vehicle);
+  \draw[relation] (driver) -- node[relabel,above,sloped] {1 à plusieurs} (location);
+  \draw[relation] (driver) -- node[relabel,below,sloped] {1 à plusieurs} (statuslog);
+  \draw[relation] (superadmin) -- node[relabel,above] {1 à plusieurs} (platformsession);
+  \draw[relation] (superadmin) -- node[relabel,above,sloped] {1 à plusieurs} (platformaudit);
+\end{tikzpicture}%
+}
+\caption{Diagramme conceptuel des principales entités persistées.}
+\label{fig:database}
+\end{figure}
+\end{landscape}
+
+\section{Lecture du modèle}
+
+\begin{itemize}
+  \item Un centre regroupe ses administrateurs, ses chauffeurs et ses zones.
+  \item Un chauffeur peut être associé à un véhicule et possède plusieurs
+        positions enregistrées ainsi qu'un historique de statut.
+  \item Les administrateurs disposent de sessions et leurs opérations de
+        gestion peuvent être consignées dans le journal du centre.
+  \item Les responsables de plateforme possèdent des sessions distinctes et
+        leurs opérations sont consignées dans un journal séparé.
+\end{itemize}
+
+\chapter{Séquence de suivi de la position}
+
+\section{Scénario principal}
+
+Le diagramme ci-dessous détaille un cycle représentatif : le chauffeur passe
+en ligne, l'application obtient une position, l'API contrôle et enregistre
+l'information, puis le tableau de bord reçoit l'événement. Les positions
+signalées avec une précision supérieure à cinquante mètres sont ignorées par
+le backend. Le suivi actuel est limité à l'utilisation de l'application au
+premier plan.
+
+\begin{figure}[p]
+\centering
+\resizebox{0.98\linewidth}{!}{%
+\begin{tikzpicture}[
+  participant/.style={draw=fleetblue,fill=blue!4,rounded corners=1mm,
+                      text width=2.15cm,minimum height=0.9cm,align=center,
+                      font=\small},
+  message/.style={-{Stealth[length=2.4mm]},draw=fleetgreen,line width=0.9pt},
+  response/.style={{Stealth[length=2.4mm]}-,draw=fleetblue,line width=0.9pt},
+  event/.style={font=\scriptsize,fill=white,inner sep=2pt,align=center},
+  lifeline/.style={draw=fleetgray,densely dashed}
+]
+  \foreach \id/\x/\name in {
+    A/0/{Chauffeur},
+    B/2.7/{Application\\mobile},
+    C/5.4/{Service GPS\\du téléphone},
+    D/8.1/{API\\centrale},
+    E/10.8/{Base de\\données},
+    F/13.5/{Tableau de\\bord}
+  } {
+    \node[participant] (p\id) at (\x,0) {\name};
+    \draw[lifeline] (\x,-0.55) -- (\x,-9.55);
+  }
+
+  \draw[message] ([yshift=-0.9cm]pA.south) -- node[event,above] {1. Active le statut\\en ligne} ([yshift=-0.9cm]pB.south);
+  \draw[message] ([yshift=-1.45cm]pB.south) -- node[event,above] {2. Demande l'accès\\à la localisation} ([yshift=-1.45cm]pC.south);
+  \draw[response] ([yshift=-2cm]pC.south) -- node[event,above] {3. Autorisation\\accordée} ([yshift=-2cm]pB.south);
+  \draw[message] ([yshift=-2.55cm]pB.south) -- node[event,above] {4. Envoie le statut et\\l'identifiant d'accès} ([yshift=-2.55cm]pD.south);
+  \draw[message] ([yshift=-3.1cm]pD.south) -- node[event,above] {5. Vérifie l'accès et\\mémorise le statut} ([yshift=-3.1cm]pE.south);
+  \draw[response] ([yshift=-3.65cm]pE.south) -- node[event,above] {6. Confirmation} ([yshift=-3.65cm]pD.south);
+  \draw[response] ([yshift=-4.2cm]pD.south) -- node[event,above] {7. Confirme l'état\\en ligne} ([yshift=-4.2cm]pB.south);
+  \draw[message] ([yshift=-4.75cm]pB.south) -- node[event,above] {8. Demande une\\position actuelle} ([yshift=-4.75cm]pC.south);
+  \draw[response] ([yshift=-5.3cm]pC.south) -- node[event,above] {9. Renvoie position,\\précision et date} ([yshift=-5.3cm]pB.south);
+  \draw[message] ([yshift=-5.85cm]pB.south) -- node[event,above] {10. Transmet la position\\avec l'identifiant d'accès} ([yshift=-5.85cm]pD.south);
+  \draw[message] ([yshift=-6.4cm]pD.south) -- node[event,above] {11. Valide puis enregistre\\la position acceptée} ([yshift=-6.4cm]pE.south);
+  \draw[response] ([yshift=-6.95cm]pE.south) -- node[event,above] {12. Écriture confirmée} ([yshift=-6.95cm]pD.south);
+  \draw[message] ([yshift=-7.5cm]pD.south) -- node[event,above] {13. Diffuse l'événement\\au centre concerné} ([yshift=-7.5cm]pF.south);
+  \draw[message] ([yshift=-8.05cm]pF.south) -- ++(0.8,0) -- ++(0,-0.35)
+    -- node[event,left] {14. Actualise la carte\\et l'état affiché} ++(-0.8,0);
+
+  \node[draw=fleetgray,fill=gray!6,rounded corners=1mm,
+        text width=8.2cm,align=center,font=\scriptsize]
+        at (6.75,-9.1)
+        {Si la précision reçue dépasse le seuil de 50 m, la position est écartée
+        et ne produit pas de nouvel événement cartographique.};
+\end{tikzpicture}%
+}
+\caption{Séquence simplifiée de transmission et d'affichage d'une position.}
+\label{fig:sequence}
+\end{figure}
+
+\chapter{Choix technologiques}
+
+\section{Principes de choix}
+
+Les choix privilégient une séparation claire entre les interfaces et les
+services, des technologies adaptées au suivi géographique et une base
+relationnelle appropriée aux associations entre centres, comptes, chauffeurs
+et historiques. Ils permettent également de construire progressivement le
+produit sans faire dépendre les applications clientes l'une de l'autre.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\linewidth}{>{\bfseries}p{3.2cm} X X}
+\toprule
+Composant & Technologie retenue & Justification synthétique \\
+\midrule
+API serveur & Python et FastAPI & Permet de structurer les échanges HTTP et
+temps réel, de valider les données reçues et de centraliser les règles
+fonctionnelles. \\
+Persistance & PostgreSQL & Convient aux données structurées, aux relations
+entre entités et à la conservation des historiques utiles au suivi. \\
+Accès aux données & SQLAlchemy asynchrone et Alembic & Fournit une couche
+relationnelle cohérente avec le traitement asynchrone et une évolution
+contrôlée du schéma. \\
+Application mobile & React Native et TypeScript & Permet de partager une
+approche de développement entre Android et iOS tout en accédant aux capacités
+de géolocalisation du téléphone. \\
+Tableau de bord & HTML, CSS et JavaScript & Offre une interface navigateur
+légère et indépendante du cycle de développement mobile. \\
+Cartographie & Leaflet et OpenStreetMap & Associe une bibliothèque de carte
+interactive à un fond cartographique adapté à la visualisation des positions. \\
+Communication en direct & WebSocket & Permet au backend de pousser les nouveaux
+événements de statut et de position au tableau de bord connecté. \\
+\bottomrule
+\end{tabularx}
+\caption{Technologies majeures et raisons de leur choix.}
+\label{tab:stack}
+\end{table}
+
+\section{Cohérence de l'ensemble}
+
+L'API est le point commun des trois interfaces, ce qui évite de disperser la
+validation et les règles d'accès. La base relationnelle conserve un historique
+exploitable plutôt que de ne garder qu'une position en mémoire. Les échanges
+HTTP couvrent les opérations classiques, tandis que le WebSocket répond au
+besoin de mise à jour immédiate de la carte. Enfin, l'application mobile est
+adaptée à l'usage du chauffeur sur le terrain.
+
+\chapter{État actuel, limites et perspectives}
+
+\section{État fonctionnel}
+
+Le projet comprend les éléments suivants :
+\begin{itemize}
+  \item une API de suivi et de gestion des accès ;
+  \item une application mobile chauffeur avec disponibilité et envoi de
+        positions au premier plan ;
+  \item un tableau de bord web présentant chauffeurs, carte et états de
+        fraîcheur ;
+  \item une console séparée pour la gestion des centres et la consultation
+        d'un journal d'audit de plateforme ;
+  \item un stockage PostgreSQL structuré par centre et des migrations de
+        schéma.
+\end{itemize}
+
+La documentation du projet fait état d'un parcours de bout en bout vérifié :
+une position réelle provenant d'un téléphone ou d'un émulateur apparaît sur
+le tableau de bord.
+
+\section{Limites identifiées}
+
+\begin{itemize}
+  \item Le suivi de localisation s'arrête lorsque l'application quitte son
+        écran principal ou n'est plus au premier plan.
+  \item Le système n'attribue pas de course et ne gère ni la réservation, ni
+        l'affectation, ni la facturation.
+  \item Les fonctionnalités ERP et d'aide à la décision par apprentissage
+        automatique restent des perspectives et non des fonctions livrées.
+  \item Le dépôt ne décrit pas encore de déploiement cloud ni de chaîne
+        d'intégration et de livraison continue.
+  \item La couverture des tests est encore en cours d'élargissement par rapport
+        aux parcours fonctionnels complets.
+\end{itemize}
+
+\section{Perspectives possibles}
+
+Les prolongements naturels peuvent inclure un suivi en arrière-plan soumis aux
+autorisations mobiles, une gestion plus complète des véhicules, des parcours
+de dispatching et des écrans de rapports. Ils devraient être introduits
+progressivement, en s'appuyant sur les besoins des utilisateurs, les règles de
+protection des données de localisation et les capacités de l'infrastructure
+cible.
+
+\chapter{Conclusion}
+
+Fleet Tracker apporte une réponse concrète au besoin de visibilité sur une
+flotte de taxis : le chauffeur signale sa disponibilité et transmet sa
+position, tandis que le responsable suit l'activité depuis une interface
+cartographique. Le backend et la base de données assurent le lien central entre
+ces usages, avec une séparation des données par centre et une mise à jour en
+direct du tableau de bord.
+
+La version actuelle constitue une fondation fonctionnelle de suivi GPS, et
+non un système complet de dispatching ou de gestion de transport. Son
+architecture modulaire permet d'envisager ces évolutions sans confondre les
+capacités déjà présentes et les objectifs futurs.
+
+\appendix
+\chapter{Glossaire}
+
+\begin{description}[style=nextline,leftmargin=3.2cm,labelwidth=2.9cm]
+  \item[API] Interface par laquelle les applications échangent des données
+        avec le service backend.
+  \item[Centre] Périmètre organisationnel auquel sont rattachés des
+        administrateurs, des chauffeurs et des données de suivi.
+  \item[Position] Coordonnées géographiques horodatées, éventuellement
+        complétées par une vitesse, une direction et une précision.
+  \item[WebSocket] Mécanisme de communication qui permet au serveur de pousser
+        des événements vers une interface déjà connectée.
+  \item[Fraîcheur] Âge de la dernière position reçue, utilisé pour distinguer
+        une information récente d'une information devenue ancienne.
+\end{description}
+
+\end{document}
