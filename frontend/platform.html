@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Platform Console | Fleet Tracker</title>
+  <link rel="stylesheet" href="./src/platform.css" />
+</head>
+<body>
+  <main id="loginView" class="login-view">
+    <form id="loginForm" class="login-card">
+      <p class="eyebrow">Fleet Tracker · Platform owner</p>
+      <h1>Sign in</h1>
+      <label for="emailInput">Email</label>
+      <input id="emailInput" name="email" type="email" maxlength="255" autocomplete="username" required />
+      <label for="passwordInput">Password</label>
+      <input id="passwordInput" name="password" type="password" maxlength="128" autocomplete="current-password" required />
+      <p id="loginMessage" class="message" role="alert" aria-live="polite"></p>
+      <button class="button primary" type="submit">Log in</button>
+    </form>
+  </main>
+
+  <div id="consoleView" class="console-shell" hidden>
+    <aside class="sidebar" aria-label="Platform navigation">
+      <a class="brand" href="./platform.html">Fleet <span>Platform</span></a>
+      <p class="sidebar-label">Owner console</p>
+      <nav class="navigation">
+        <button class="navigation-link selected" type="button" data-section="centers">Centers</button>
+        <button class="navigation-link" type="button" data-section="audit">Audit log</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="ownerEmail" class="owner-email"></span>
+        <button id="logoutButton" class="button secondary" type="button">Log out</button>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <p id="consoleMessage" class="message console-message" role="status" aria-live="polite"></p>
+      <section id="centersSection" class="content-section" aria-labelledby="centersTitle">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">Platform management</p>
+            <h1 id="centersTitle">Centers</h1>
+          </div>
+        </header>
+        <div class="content-grid">
+          <section class="panel" aria-labelledby="newCenterTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Setup</p>
+                <h2 id="newCenterTitle">New center</h2>
+              </div>
+            </div>
+            <form id="centerForm" class="form-grid">
+              <label for="centerName">Name</label>
+              <input id="centerName" name="name" type="text" maxlength="200" required />
+              <label for="centerCity">City</label>
+              <input id="centerCity" name="city" type="text" maxlength="100" required />
+              <label for="centerTimezone">IANA timezone</label>
+              <input id="centerTimezone" name="timezone" type="text" maxlength="50" placeholder="Africa/Tunis" required />
+              <p id="centerMessage" class="message form-message" role="alert" aria-live="polite"></p>
+              <button class="button primary" type="submit">Create center</button>
+            </form>
+          </section>
+
+          <section class="panel table-panel" aria-labelledby="centersListTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Fleet footprint</p>
+                <h2 id="centersListTitle">All centers</h2>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">City</th>
+                    <th scope="col">Timezone</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Drivers</th>
+                    <th scope="col">Admins</th>
+                  </tr>
+                </thead>
+                <tbody id="centersTableBody"></tbody>
+              </table>
+            </div>
+            <p id="centersEmpty" class="empty-state" hidden>No centers have been created.</p>
+          </section>
+        </div>
+      </section>
+
+      <section id="auditSection" class="content-section" aria-labelledby="auditTitle" hidden>
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">Platform activity</p>
+            <h1 id="auditTitle">Audit log</h1>
+          </div>
+        </header>
+        <section class="panel table-panel" aria-label="Read-only platform audit events">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Latest events</p>
+              <h2>Activity history</h2>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Time (UTC)</th>
+                  <th scope="col">Action</th>
+                  <th scope="col">Target</th>
+                  <th scope="col">Result</th>
+                  <th scope="col">IP</th>
+                  <th scope="col">User agent</th>
+                </tr>
+              </thead>
+              <tbody id="auditTableBody"></tbody>
+            </table>
+          </div>
+          <p id="auditEmpty" class="empty-state" hidden>No audit events are available.</p>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="./src/config.js"></script>
+  <script src="./src/platform.js"></script>
+</body>
+</html>

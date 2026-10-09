@@ -24,16 +24,29 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import Headers
 
 from app.config import settings
 from app.db import engine, get_db
 from app.models import Admin, AdminSession, Driver, DriverLocation
+from app.platform.router import router as platform_router
 
 MAX_ACCURACY_M = 50
 ADMIN_SESSION_COOKIE = "admin_session"
 ADMIN_SESSION_TTL = timedelta(hours=8)
 password_hasher = PasswordHasher()
 dummy_password_hash = password_hasher.hash(secrets.token_urlsafe(32))
+
+
+class ExplicitOriginCORSMiddleware(CORSMiddleware):
+    def preflight_response(self, request_headers: Headers) -> Response:
+        response = super().preflight_response(request_headers)
+        origin = request_headers.get("origin")
+        if origin not in self.allow_origins:
+            for header in list(response.headers.keys()):
+                if header.lower().startswith("access-control-"):
+                    del response.headers[header]
+        return response
 
 
 def _normalize_recorded_at(value: float | None) -> float:
@@ -55,12 +68,13 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Fleet Tracker", lifespan=lifespan)
 app.add_middleware(
-    CORSMiddleware,
+    ExplicitOriginCORSMiddleware,
     allow_origins=settings.allowed_web_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "X-Token"],
 )
+app.include_router(platform_router)
 clients: dict[WebSocket, uuid.UUID] = {}
 
 

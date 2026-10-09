@@ -16,6 +16,8 @@ The `%20` in the URL encodes the leading space in the password. Set `POSTGRES_PA
 
 Admins log in with the email and password entered in the dashboard; successful login sets an eight-hour HTTP-only session cookie. `APP_ENV` accepts `development` or `production`; it defaults to `production` when unset or invalid and controls whether the session cookie uses the `Secure` flag.
 
+Platform-owner login uses a separate four-hour HTTP-only `platform_session` cookie scoped to `/platform`; it cannot authenticate center-admin routes or the driver WebSocket.
+
 ## Start the backend on Windows PowerShell
 
 From the repository root, activate the project venv, then change into `backend/`. Set `DATABASE_URL` to the PostgreSQL database where the center and admin should be created. The seed scripts support both module invocations from `backend/` and direct script invocations.
@@ -34,6 +36,14 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 The admin seed checks whether the email already exists before prompting. If it does, it prints `Admin already exists; no changes made.` and exits without requesting a password. Otherwise it asks for the password twice using hidden input and requires 12 to 128 characters. It selects the only existing center. If there are zero or multiple centers, it stops with an error unless you provide `--center-id <UUID>`.
+
+Create a platform-owner account from `backend/` with:
+
+```powershell
+python -m scripts.seed_super_admin --email owner@example.com
+```
+
+This hidden-prompt seed command is only for creating the first platform-owner super admin. It refuses to prompt if any super admin already exists; it is not a command for adding later owner accounts.
 
 Deactivate an admin from `backend/` with:
 
