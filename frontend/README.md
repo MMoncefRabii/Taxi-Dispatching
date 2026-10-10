@@ -15,6 +15,12 @@ Open <http://localhost:5173/>. The API base URL is set in `src/config.js`; the d
 
 The platform-owner console is available at <http://localhost:5173/platform.html>. It uses the same configured API base URL and credentialed, HTTP-only platform session cookie. Bootstrap the first platform owner from `backend/` with `python -m scripts.seed_super_admin --email owner@example.com`; see the backend README for the hidden password prompts.
 
+## Center admin invitations
+
+From the platform console, use **Invite admin** for a center. The console shows a non-secret invitation page link and a separate one-time token once. Send the token to the invitee through a separate secure channel; the token is not embedded in the link. The invitee opens `invite.html`, enters the token, and chooses a password of 12–128 characters. The token expires after 48 hours and can be used once. The link and token are cleared from the console dialog when it closes and are not stored by the frontend.
+
+Set `FRONTEND_BASE_URL` in the backend environment to the frontend base URL used to build invitation links. It defaults to `http://localhost:5173` and must be an HTTP(S) URL without a trailing slash. Add the exact frontend origin to `WEB_ORIGINS` as well so the browser can call the API.
+
 ## Development tasks in the platform console
 
 The platform console's **Dev tasks** section is available only when the backend is started with `DEV_TASKS_ENABLED=true` and `APP_ENV=development`. The task runner is disabled by default and refuses to start in production. It exposes only the fixed, allowlisted local-development tasks shown in the console; it does not accept arbitrary commands. Run the console on the same machine as the backend, and sign in as a platform owner.
@@ -32,3 +38,6 @@ Output is kept in memory for the current backend process and is discarded when i
 - `platform.html`: platform-owner login and console document.
 - `src/platform.css`: platform console styling.
 - `src/platform.js`: platform console API client and UI behavior.
+- `invite.html`: public center-admin invitation acceptance page.
+- `src/invite.css`: invitation page styling.
+- `src/invite.js`: invitation acceptance behavior.

@@ -219,6 +219,27 @@ tbody tr:last-child td { border-bottom: 0; }
 .status.active, .result.success { color: var(--online); }
 .status.inactive, .result.failure { color: var(--danger); }
 .empty-state { padding: 18px 20px; color: var(--muted); }
+.status.pending { color: var(--accent); }
+.status.used, .status.expired, .status.revoked { color: var(--muted); }
+
+.modal {
+  width: min(560px, calc(100% - 28px));
+  max-height: min(85vh, 760px);
+  padding: 0;
+  color: var(--text);
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.modal::backdrop { background: rgba(8, 16, 27, 0.62); }
+.modal-content { display: grid; gap: 10px; padding: 24px; }
+.modal-content h2 { margin-bottom: 8px; }
+.modal-content input { margin-bottom: 4px; }
+.modal-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.invitation-warning { margin: 4px 0; font-weight: 700; }
+td .button { margin: 2px 6px 2px 0; }
 
 .dev-tools-banner {
   padding: 13px 16px;

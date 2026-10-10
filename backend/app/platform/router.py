@@ -1,5 +1,6 @@
 import hashlib
 import secrets
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -8,14 +9,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from email_validator import EmailNotValidError, validate_email
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_db
 from app.models import (
     Admin,
+    AdminInvitation,
     Center,
     Driver,
     PlatformAuditLog,
@@ -23,6 +26,12 @@ from app.models import (
     SuperAdmin,
 )
 from app.platform.audit import email_sha256, record_platform_event
+from app.platform.invitations import (
+    CenterNotFoundError,
+    ExistingAdminError,
+    InactiveCenterError,
+    create_invitation,
+)
 from app.platform.auth import (
     PLATFORM_SESSION_COOKIE,
     PlatformPrincipal,
@@ -89,6 +98,40 @@ class NewCenter(BaseModel):
         except (ZoneInfoNotFoundError, ValueError):
             raise ValueError("Unknown IANA timezone")
         return value
+
+
+class NewAdminInvitation(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    email: str = Field(min_length=3, max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_address(cls, value: str) -> str:
+        normalized_input = value.strip()
+        local_part, separator, domain = normalized_input.rpartition("@")
+        if (
+            separator
+            and len(domain) > len(".invalid")
+            and domain.lower().endswith(".invalid")
+        ):
+            # Preserve the reserved test domain used for non-deliverable invitations.
+            try:
+                validate_email(
+                    f"{local_part}@{domain[:-len('.invalid')]}.example.com",
+                    check_deliverability=False,
+                )
+            except EmailNotValidError as error:
+                raise ValueError("Enter a valid email address") from error
+            return normalized_input.lower()
+        try:
+            normalized = validate_email(
+                normalized_input,
+                check_deliverability=False,
+            )
+        except EmailNotValidError as error:
+            raise ValueError("Enter a valid email address") from error
+        return normalized.normalized.lower()
 
 
 def _serialize_center(
@@ -276,6 +319,139 @@ async def create_center(
     )
     await db.commit()
     return _serialize_center(center, 0, 0)
+
+
+@router.post("/centers/{center_id}/invitations", status_code=201)
+async def create_center_invitation(
+    center_id: uuid.UUID,
+    body: NewAdminInvitation,
+    request: Request,
+    response: Response,
+    principal: PlatformPrincipal = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    try:
+        token = await create_invitation(
+            db,
+            center_id,
+            body.email,
+            principal.super_admin.id,
+        )
+    except CenterNotFoundError:
+        raise HTTPException(404, "Center not found") from None
+    except InactiveCenterError:
+        raise HTTPException(409, "Center is inactive") from None
+    except ExistingAdminError:
+        raise HTTPException(409, "An admin already exists for this email") from None
+
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    invitation_result = await db.execute(
+        select(AdminInvitation).where(AdminInvitation.token_hash == token_hash)
+    )
+    invitation = invitation_result.scalar_one()
+    record_platform_event(
+        db,
+        request,
+        action="invitation_created",
+        target_type="invitation",
+        target_id=invitation.id,
+        success=True,
+        super_admin_id=principal.super_admin.id,
+    )
+    await db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "invitation_id": str(invitation.id),
+        "email": invitation.email,
+        "expires_at": invitation.expires_at,
+        "link": f"{settings.frontend_base_url}/invite.html",
+        "token": token,
+    }
+
+
+@router.get("/centers/{center_id}/invitations")
+async def list_center_invitations(
+    center_id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    _principal: PlatformPrincipal = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, object]]:
+    now = datetime.now(timezone.utc)
+    invitations = (
+        await db.execute(
+            select(AdminInvitation)
+            .where(AdminInvitation.center_id == center_id)
+            .order_by(AdminInvitation.created_at.desc(), AdminInvitation.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).scalars().all()
+
+    def status(invitation: AdminInvitation) -> str:
+        if invitation.used_at is not None:
+            return "used"
+        if invitation.revoked_at is not None:
+            return "revoked"
+        if invitation.expires_at <= now:
+            return "expired"
+        return "pending"
+
+    return [
+        {
+            "id": str(invitation.id),
+            "email": invitation.email,
+            "created_at": invitation.created_at,
+            "expires_at": invitation.expires_at,
+            "status": status(invitation),
+        }
+        for invitation in invitations
+    ]
+
+
+@router.post("/invitations/{invitation_id}/revoke")
+async def revoke_invitation(
+    invitation_id: uuid.UUID,
+    request: Request,
+    principal: PlatformPrincipal = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, bool]:
+    result = await db.execute(
+        select(AdminInvitation).where(AdminInvitation.id == invitation_id)
+    )
+    invitation = result.scalar_one_or_none()
+    if invitation is None:
+        raise HTTPException(404, "Invitation not found")
+
+    now = datetime.now(timezone.utc)
+    if (
+        invitation.used_at is None
+        and invitation.revoked_at is None
+        and invitation.expires_at > now
+    ):
+        revoked = await db.execute(
+            update(AdminInvitation)
+            .where(
+                AdminInvitation.id == invitation_id,
+                AdminInvitation.used_at.is_(None),
+                AdminInvitation.revoked_at.is_(None),
+                AdminInvitation.expires_at > now,
+            )
+            .values(revoked_at=now)
+            .returning(AdminInvitation.id)
+        )
+        if revoked.scalar_one_or_none() is not None:
+            record_platform_event(
+                db,
+                request,
+                action="invitation_revoked",
+                target_type="invitation",
+                target_id=invitation_id,
+                success=True,
+                super_admin_id=principal.super_admin.id,
+            )
+            await db.commit()
+    return {"ok": True}
 
 
 @router.get("/audit")

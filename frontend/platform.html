@@ -82,6 +82,7 @@
                     <th scope="col">Status</th>
                     <th scope="col">Drivers</th>
                     <th scope="col">Admins</th>
+                    <th scope="col">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="centersTableBody"></tbody>
@@ -137,6 +138,60 @@
       </section>
     </main>
   </div>
+
+  <dialog id="inviteAdminDialog" class="modal">
+    <form id="inviteAdminForm" class="modal-content">
+      <p class="eyebrow">Center admin</p>
+      <h2 id="inviteAdminTitle">Invite admin</h2>
+      <label for="inviteAdminEmail">Email</label>
+      <input id="inviteAdminEmail" name="email" type="email" maxlength="254" autocomplete="email" required />
+      <p id="inviteAdminMessage" class="message" role="alert" aria-live="polite"></p>
+      <div class="modal-actions">
+        <button class="button primary" type="submit">Create invitation</button>
+        <button class="button secondary" type="button" data-close-invite>Cancel</button>
+      </div>
+    </form>
+    <section id="inviteResult" class="modal-content" hidden>
+      <p class="eyebrow">Invitation created</p>
+      <h2>Share the invitation</h2>
+      <label for="inviteLink">Invitation page (not a secret)</label>
+      <input id="inviteLink" type="text" readonly />
+      <button id="copyInviteLink" class="button secondary" type="button">Copy link</button>
+      <label for="inviteToken">One-time token</label>
+      <input id="inviteToken" type="text" readonly autocomplete="off" />
+      <button id="copyInviteToken" class="button secondary" type="button">Copy token</button>
+      <p id="inviteResultMessage" class="message" role="status" aria-live="polite"></p>
+      <p class="invitation-warning">The token is shown only once. It expires in 48 hours and can be used once.</p>
+      <p class="message">The page link is not secret and can be reused. Share the one-time token with the invitee through a separate secure channel.</p>
+      <button id="closeInviteResult" class="button secondary" type="button">Close</button>
+    </section>
+  </dialog>
+
+  <dialog id="centerInvitationsDialog" class="modal">
+    <section class="modal-content">
+      <p class="eyebrow">Center admin</p>
+      <h2 id="centerInvitationsTitle">Invitations</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Email</th>
+              <th scope="col">Created</th>
+              <th scope="col">Expires</th>
+              <th scope="col">Status</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody id="centerInvitationsBody"></tbody>
+        </table>
+      </div>
+      <p id="centerInvitationsEmpty" class="empty-state" hidden>No invitations are available.</p>
+      <p id="centerInvitationsMessage" class="message" role="alert" aria-live="polite"></p>
+      <div class="modal-actions">
+        <button id="closeCenterInvitations" class="button secondary" type="button">Close</button>
+      </div>
+    </section>
+  </dialog>
 
   <script src="./src/config.js"></script>
   <script src="./src/platform.js"></script>
