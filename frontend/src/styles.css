@@ -177,6 +177,7 @@ body {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   padding: 12px 14px;
@@ -186,7 +187,7 @@ body {
 
 .search-wrap {
   position: relative;
-  flex: 1;
+  flex: 1 1 150px;
 }
 
 .search-wrap input {
@@ -197,6 +198,16 @@ body {
   background: var(--panel-strong);
   color: var(--text);
   outline: none;
+}
+
+.toolbar select {
+  min-width: 90px;
+  max-width: 105px;
+  padding: 9px 7px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-strong);
+  color: var(--text);
 }
 
 .search-wrap::before {
@@ -234,8 +245,9 @@ body {
 
 .driver-item {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   width: 100%;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.04);
@@ -246,6 +258,19 @@ body {
   color: var(--text);
   cursor: pointer;
   transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.driver-select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
 }
 
 .driver-item:hover {
@@ -285,6 +310,40 @@ body {
   display: flex;
   gap: 7px;
   flex-wrap: wrap;
+}
+
+.driver-vehicle {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.inactive-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: rgba(217, 80, 80, 0.13);
+  color: var(--danger);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.driver-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  padding-left: 22px;
+}
+
+.driver-actions .btn {
+  padding: 6px 8px;
+  font-size: 0.75rem;
+}
+
+.driver-actions .danger-button {
+  color: var(--danger);
 }
 
 .driver-speed {
@@ -399,6 +458,22 @@ body {
   border-radius: 10px;
   background: var(--panel-strong);
   color: var(--text);
+}
+
+.vehicle-fields {
+  margin: 2px 0 12px;
+  padding: 10px 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.vehicle-fields legend {
+  padding: 0 6px;
+  font-weight: 700;
+}
+
+.vehicle-fields input:last-child {
+  margin-bottom: 10px;
 }
 
 .dialog-box .error {

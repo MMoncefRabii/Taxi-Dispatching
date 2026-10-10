@@ -21,6 +21,12 @@ From the platform console, use **Invite admin** for a center. The console shows 
 
 Set `FRONTEND_BASE_URL` in the backend environment to the frontend base URL used to build invitation links. It defaults to `http://localhost:5173` and must be an HTTP(S) URL without a trailing slash. Add the exact frontend origin to `WEB_ORIGINS` as well so the browser can call the API.
 
+## Center driver management
+
+Center admins can create drivers with a vehicle, edit driver and vehicle details, deactivate or reactivate a driver, and regenerate an active driver's token. The vehicle form's **Model** field uses the existing `vehicles.type` column; taxi number and plate are required. Plates are trimmed, uppercased, and limited to letters, numbers, spaces, and hyphens.
+
+Reactivate and **New token** actions show the token once in the existing token dialog. A regenerated/reactivated token must be passed to the driver through a secure channel; the prior token stops working immediately. Closing the dialog clears the token from the page and the dashboard's in-memory token variable. The dashboard does not persist driver tokens in browser storage.
+
 ## Development tasks in the platform console
 
 The platform console's **Dev tasks** section is available only when the backend is started with `DEV_TASKS_ENABLED=true` and `APP_ENV=development`. The task runner is disabled by default and refuses to start in production. It exposes only the fixed, allowlisted local-development tasks shown in the console; it does not accept arbitrary commands. Run the console on the same machine as the backend, and sign in as a platform owner.

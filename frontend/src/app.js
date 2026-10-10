@@ -21,6 +21,8 @@ const state = {
   reconnectTimer: null,
   liveStatus: 'reconnecting',
   search: '',
+  driverFilter: 'all',
+  editingDriverId: null,
   lastRefreshAt: 0,
 
   authenticated: false
@@ -46,6 +48,7 @@ const elements = {
   driverList: document.getElementById('driverList'),
   fitBtn: document.getElementById('fitBtn'),
   searchInput: document.getElementById('searchInput'),
+  driverFilter: document.getElementById('driverFilter'),
   counterOnline: document.getElementById('counter-online'),
   counterStale: document.getElementById('counter-stale'),
   counterOffline: document.getElementById('counter-offline'),
@@ -56,8 +59,12 @@ const elements = {
   newDriverBtn: document.getElementById('newDriverBtn'),
   newDriverOverlay: document.getElementById('newDriverOverlay'),
   newDriverForm: document.getElementById('newDriverForm'),
+  newDriverTitle: document.getElementById('newDriverTitle'),
   newDriverName: document.getElementById('newDriverName'),
   newDriverPhone: document.getElementById('newDriverPhone'),
+  newDriverTaxiNumber: document.getElementById('newDriverTaxiNumber'),
+  newDriverPlate: document.getElementById('newDriverPlate'),
+  newDriverModel: document.getElementById('newDriverModel'),
   newDriverError: document.getElementById('newDriverError'),
   cancelNewDriverBtn: document.getElementById('cancelNewDriverBtn'),
   submitNewDriverBtn: document.getElementById('submitNewDriverBtn'),
@@ -73,7 +80,7 @@ const elements = {
 let oneTimeToken = '';
 
 function getDriverStatus(driver) {
-  if (!driver || driver.lat == null || driver.lng == null) {
+  if (!driver || driver.active === false || driver.lat == null || driver.lng == null) {
     return STATUS.OFFLINE;
   }
   if (driver.online === 1) {
@@ -250,8 +257,13 @@ function renderList() {
   const query = elements.searchInput.value.trim().toLowerCase();
   let rows = Array.from(state.drivers.values());
   rows = rows.filter((driver) => {
+    if (state.driverFilter === 'active' && driver.active === false) return false;
+    if (state.driverFilter === 'inactive' && driver.active !== false) return false;
     if (!query) return true;
-    return `${driver.name || ''} ${driver.phone || ''}`.toLowerCase().includes(query);
+    const vehicle = driver.vehicle || {};
+    return `${driver.name || ''} ${driver.phone || ''} ${vehicle.plate_number || ''} ${vehicle.taxi_number || ''} ${vehicle.type || ''}`
+      .toLowerCase()
+      .includes(query);
   });
 
   rows.sort((a, b) => {
@@ -274,14 +286,15 @@ function renderList() {
     const status = getDriverStatus(driver);
     const statusColor = getStatusColor(driver);
     const isActive = String(state.selectedDriverId) === String(driver.id);
-    const row = document.createElement('button');
-    row.className = `driver-item${isActive ? ' active' : ''}`;
-    row.dataset.id = String(driver.id);
-    row.type = 'button';
+    const row = document.createElement('article');
+    row.className = `driver-item${isActive ? ' active' : ''}${driver.active === false ? ' inactive' : ''}`;
 
     const dot = document.createElement('span');
     dot.className = 'driver-dot';
     dot.style.background = statusColor;
+    const selectButton = document.createElement('button');
+    selectButton.className = 'driver-select';
+    selectButton.type = 'button';
     const main = document.createElement('span');
     main.className = 'driver-main';
     const name = document.createElement('span');
@@ -294,23 +307,64 @@ function renderList() {
     const statusText = document.createElement('span');
     statusText.textContent = status;
     meta.append(phone, statusText);
+    if (driver.active === false) {
+      const inactiveBadge = document.createElement('span');
+      inactiveBadge.className = 'inactive-badge';
+      inactiveBadge.textContent = 'Inactive';
+      meta.appendChild(inactiveBadge);
+    }
     main.append(name, meta);
 
+    const vehicleLabel = document.createElement('span');
+    vehicleLabel.className = 'driver-vehicle';
+    const vehicle = driver.vehicle || {};
+    vehicleLabel.textContent = [vehicle.plate_number, vehicle.type]
+      .filter(Boolean)
+      .join(' · ') || 'No vehicle';
+    main.appendChild(vehicleLabel);
     const speed = document.createElement('span');
     speed.className = 'driver-speed';
     speed.append(document.createTextNode(formatSpeedKmh(driver.speed)));
     speed.append(document.createElement('br'));
     speed.append(document.createTextNode(formatLastSeen(driver)));
-    row.append(dot, main, speed);
-    row.addEventListener('click', () => {
-      const id = row.dataset.id;
-      const driver = state.drivers.get(id);
-      state.selectedDriverId = id;
+    selectButton.append(dot, main, speed);
+    selectButton.addEventListener('click', () => {
+      state.selectedDriverId = String(driver.id);
       renderList();
-      if (driver) {
-        openDriverCard(driver);
-      }
+      openDriverCard(driver);
     });
+    const actions = document.createElement('div');
+    actions.className = 'driver-actions';
+    const editButton = document.createElement('button');
+    editButton.className = 'btn secondary';
+    editButton.type = 'button';
+    editButton.textContent = 'Edit';
+    editButton.addEventListener('click', () => showNewDriverDialog(driver));
+    actions.appendChild(editButton);
+
+    if (driver.active === false) {
+      const reactivateButton = document.createElement('button');
+      reactivateButton.className = 'btn secondary';
+      reactivateButton.type = 'button';
+      reactivateButton.textContent = 'Reactivate';
+      reactivateButton.addEventListener('click', () => reactivateDriver(driver));
+      actions.appendChild(reactivateButton);
+    } else {
+      const deactivateButton = document.createElement('button');
+      deactivateButton.className = 'btn secondary danger-button';
+      deactivateButton.type = 'button';
+      deactivateButton.textContent = 'Deactivate';
+      deactivateButton.addEventListener('click', () => deactivateDriver(driver));
+      actions.appendChild(deactivateButton);
+
+      const tokenButton = document.createElement('button');
+      tokenButton.className = 'btn secondary';
+      tokenButton.type = 'button';
+      tokenButton.textContent = 'New token';
+      tokenButton.addEventListener('click', () => regenerateDriverToken(driver));
+      actions.appendChild(tokenButton);
+    }
+    row.append(selectButton, actions);
     return row;
   });
   elements.driverList.replaceChildren(...items);
@@ -357,7 +411,7 @@ function handleLocationEvent(event) {
   next.speed = event.speed ?? next.speed ?? null;
   next.heading = event.heading ?? next.heading ?? 0;
   next.recorded_at = Number(event.recorded_at);
-  next.online = 1;
+  next.online = next.active === false ? 0 : 1;
   state.drivers.set(driverId, next);
   updateDriverListState();
 }
@@ -366,7 +420,30 @@ function handleStatusEvent(event) {
   const driverId = String(event.driver_id);
   const driver = state.drivers.get(driverId);
   const next = driver ? { ...driver } : { id: driverId, name: 'Unknown driver', phone: '', online: 0, lat: null, lng: null, speed: null, heading: null, accuracy: null, recorded_at: null };
-  next.online = event.online ? 1 : 0;
+  next.online = next.active === false ? 0 : event.online ? 1 : 0;
+  state.drivers.set(driverId, next);
+  updateDriverListState();
+}
+
+function handleDriverStatusEvent(event) {
+  const driverId = String(event.driver_id);
+  const driver = state.drivers.get(driverId);
+  const next = driver ? { ...driver } : {
+    id: driverId,
+    name: 'Unknown driver',
+    phone: '',
+    online: 0,
+    active: false,
+    vehicle: null,
+    lat: null,
+    lng: null,
+    speed: null,
+    heading: null,
+    accuracy: null,
+    recorded_at: null
+  };
+  next.active = Boolean(event.active);
+  next.online = next.active && event.online ? 1 : 0;
   state.drivers.set(driverId, next);
   updateDriverListState();
 }
@@ -374,9 +451,12 @@ function handleStatusEvent(event) {
 function updateDriverFromListRow(row) {
   if (!row) return;
   const id = String(row.id);
-  const existing = state.drivers.get(id) || { id, name: '', phone: '', online: 0, lat: null, lng: null, speed: null, heading: null, accuracy: null, recorded_at: null };
+  const existing = state.drivers.get(id) || { id, name: '', phone: '', online: 0, active: true, vehicle: null, lat: null, lng: null, speed: null, heading: null, accuracy: null, recorded_at: null };
   existing.name = row.name;
   existing.phone = row.phone;
+  existing.active = row.active !== false;
+  existing.deactivated_at = row.deactivated_at;
+  existing.vehicle = row.vehicle;
   existing.online = row.online;
   existing.lat = row.lat;
   existing.lng = row.lng;
@@ -431,6 +511,8 @@ function tryConnectWebSocket() {
         handleLocationEvent(data);
       } else if (data.type === 'status') {
         handleStatusEvent(data);
+      } else if (data.type === 'driver_status') {
+        handleDriverStatusEvent(data);
       }
     } catch (err) {
       console.error('WS message parse error', err);
@@ -469,8 +551,21 @@ function hideLogin() {
   elements.loginOverlay.style.display = 'none';
 }
 
-function showNewDriverDialog() {
+function showNewDriverDialog(driver = null) {
+  state.editingDriverId = driver ? String(driver.id) : null;
+  elements.newDriverTitle.textContent = driver ? 'Edit driver' : 'New driver';
+  elements.submitNewDriverBtn.textContent = driver ? 'Save changes' : 'Create driver';
   elements.newDriverError.textContent = '';
+  elements.newDriverPlate.setCustomValidity('');
+  elements.newDriverForm.reset();
+  if (driver) {
+    const vehicle = driver.vehicle || {};
+    elements.newDriverName.value = String(driver.name || '');
+    elements.newDriverPhone.value = String(driver.phone || '');
+    elements.newDriverTaxiNumber.value = String(vehicle.taxi_number || '');
+    elements.newDriverPlate.value = String(vehicle.plate_number || '');
+    elements.newDriverModel.value = String(vehicle.type || '');
+  }
   elements.newDriverOverlay.hidden = false;
   elements.newDriverName.focus();
 }
@@ -478,6 +573,10 @@ function showNewDriverDialog() {
 function closeNewDriverDialog() {
   elements.newDriverOverlay.hidden = true;
   elements.newDriverForm.reset();
+  elements.newDriverPlate.setCustomValidity('');
+  state.editingDriverId = null;
+  elements.newDriverTitle.textContent = 'New driver';
+  elements.submitNewDriverBtn.textContent = 'Create driver';
   elements.newDriverError.textContent = '';
   elements.newDriverBtn.focus();
 }
@@ -492,61 +591,197 @@ function closeTokenDialog() {
   elements.newDriverBtn.focus();
 }
 
+function showOneTimeTokenDialog(name, token) {
+  oneTimeToken = token;
+  elements.createdDriverName.textContent = name;
+  elements.createdDriverToken.textContent = oneTimeToken;
+  elements.copyTokenStatus.textContent = '';
+  elements.listRefreshError.textContent = '';
+  elements.driverTokenOverlay.hidden = false;
+}
+
 async function createDriver(event) {
   event.preventDefault();
+  elements.newDriverPlate.setCustomValidity('');
   if (!elements.newDriverForm.reportValidity()) return;
 
+  const plate = elements.newDriverPlate.value.trim().toUpperCase();
+  if (!/^[A-Z0-9](?:[A-Z0-9 -]{0,48}[A-Z0-9])?$/.test(plate)) {
+    elements.newDriverPlate.setCustomValidity(
+      'Use letters, numbers, spaces, and hyphens; the plate must start and end with a letter or number.'
+    );
+    elements.newDriverForm.reportValidity();
+    return;
+  }
   elements.newDriverError.textContent = '';
   elements.submitNewDriverBtn.disabled = true;
-  const name = elements.newDriverName.value;
-  const phone = elements.newDriverPhone.value;
+  const name = elements.newDriverName.value.trim();
+  const phone = elements.newDriverPhone.value.trim();
+  const driverId = state.editingDriverId;
+  const body = {
+    name,
+    phone,
+    vehicle: {
+      taxi_number: elements.newDriverTaxiNumber.value.trim(),
+      plate_number: plate,
+      type: elements.newDriverModel.value.trim() || null
+    }
+  };
 
   try {
-    const response = await fetch(apiUrl('/admin/drivers'), {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, phone })
-    });
+    const response = await fetch(
+      apiUrl(driverId ? `/admin/drivers/${encodeURIComponent(driverId)}` : '/admin/drivers'),
+      {
+        method: driverId ? 'PATCH' : 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }
+    );
 
     if (!response.ok) {
       if (response.status === 401) {
-        logout();
+        await logout();
         elements.newDriverError.textContent = 'Your admin session is no longer valid. Log in again.';
       } else if (response.status === 422) {
-        elements.newDriverError.textContent = 'Check the name and phone fields and try again.';
+        elements.newDriverError.textContent =
+          'Check the driver and vehicle fields and try again.';
+      } else if (response.status === 409) {
+        elements.newDriverError.textContent =
+          'That taxi number is already assigned. Check the vehicle details and try again.';
       } else {
-        elements.newDriverError.textContent = 'Unable to create the driver. Please try again.';
+        elements.newDriverError.textContent = 'Unable to save the driver. Please try again.';
       }
       return;
     }
 
     const result = await response.json();
-    if (!result || typeof result.token !== 'string' || !result.token) {
-      elements.newDriverError.textContent = 'The driver was created, but no token was returned. Contact support.';
-      return;
-    }
+    closeNewDriverDialog();
 
-    oneTimeToken = result.token;
-    result.token = '';
-    elements.createdDriverName.textContent = String(result.name || name);
-    elements.createdDriverToken.textContent = oneTimeToken;
-    elements.copyTokenStatus.textContent = '';
-    elements.listRefreshError.textContent = '';
-    elements.newDriverOverlay.hidden = true;
-    elements.newDriverForm.reset();
-    elements.driverTokenOverlay.hidden = false;
+    if (!driverId) {
+      if (!result || typeof result.token !== 'string' || !result.token) {
+        window.alert('The driver was created, but no token was returned. Contact support.');
+        return;
+      }
+      const token = result.token;
+      result.token = '';
+      showOneTimeTokenDialog(String(result.name || name), token);
+    }
 
     try {
       await fetchLatestDrivers();
     } catch {
-      elements.listRefreshError.textContent =
-        'Driver created, but the list could not be refreshed. Refresh the page to see the new driver.';
+      if (!elements.driverTokenOverlay.hidden) {
+        elements.listRefreshError.textContent =
+          'The driver was saved, but the list could not be refreshed. Refresh the page to see the changes.';
+      } else {
+        window.alert('The driver was saved, but the list could not be refreshed. Refresh the page.');
+      }
     }
   } catch {
-    elements.newDriverError.textContent = 'Unable to create the driver. Check your connection and try again.';
+    elements.newDriverError.textContent =
+      'Unable to save the driver. Check your connection and try again.';
   } finally {
     elements.submitNewDriverBtn.disabled = false;
+  }
+}
+
+async function sendDriverAction(path) {
+  const response = await fetch(apiUrl(path), {
+    method: 'POST',
+    credentials: 'include'
+  });
+  if (response.status === 401) {
+    await logout();
+    throw new Error('unauthorized');
+  }
+  if (!response.ok) {
+    throw new Error(String(response.status));
+  }
+  return response.json();
+}
+
+async function deactivateDriver(driver) {
+  if (!window.confirm(`Deactivate ${driver.name}? The driver will be signed out immediately.`)) {
+    return;
+  }
+  try {
+    await sendDriverAction(`/admin/drivers/${encodeURIComponent(driver.id)}/deactivate`);
+  } catch (error) {
+    if (error.message !== 'unauthorized') {
+      window.alert('Unable to deactivate the driver. Please try again.');
+    }
+    return;
+  }
+  try {
+    await fetchLatestDrivers();
+  } catch {
+    window.alert('The driver was deactivated, but the list could not be refreshed.');
+  }
+}
+
+async function reactivateDriver(driver) {
+  let tokenShown = false;
+  try {
+    const result = await sendDriverAction(
+      `/admin/drivers/${encodeURIComponent(driver.id)}/reactivate`
+    );
+    if (!result || typeof result.token !== 'string' || !result.token) {
+      window.alert('The driver was reactivated, but no token was returned. Contact support.');
+      return;
+    }
+    const token = result.token;
+    result.token = '';
+    showOneTimeTokenDialog(String(driver.name || 'Driver token'), token);
+    tokenShown = true;
+  } catch (error) {
+    if (error.message !== 'unauthorized') {
+      window.alert('Unable to reactivate the driver. Please try again.');
+    }
+    return;
+  }
+  try {
+    await fetchLatestDrivers();
+  } catch {
+    if (tokenShown) {
+      elements.listRefreshError.textContent =
+        'The driver was reactivated, but the list could not be refreshed. Refresh the page.';
+    }
+  }
+}
+
+async function regenerateDriverToken(driver) {
+  if (!window.confirm(
+    `Generate a new token for ${driver.name}? The old token will stop working immediately.`
+  )) {
+    return;
+  }
+  let tokenShown = false;
+  try {
+    const result = await sendDriverAction(
+      `/admin/drivers/${encodeURIComponent(driver.id)}/token`
+    );
+    if (!result || typeof result.token !== 'string' || !result.token) {
+      window.alert('No new token was returned. Contact support.');
+      return;
+    }
+    const token = result.token;
+    result.token = '';
+    showOneTimeTokenDialog(String(driver.name || 'Driver token'), token);
+    tokenShown = true;
+  } catch (error) {
+    if (error.message !== 'unauthorized') {
+      window.alert('Unable to generate a new token. Please try again.');
+    }
+    return;
+  }
+  try {
+    await fetchLatestDrivers();
+  } catch {
+    if (tokenShown) {
+      elements.listRefreshError.textContent =
+        'The token was changed, but the list could not be refreshed. Refresh the page.';
+    }
   }
 }
 
@@ -658,7 +893,7 @@ async function initialize() {
 function init() {
   elements.loginForm.addEventListener('submit', login);
   elements.logoutBtn.addEventListener('click', logout);
-  elements.newDriverBtn.addEventListener('click', showNewDriverDialog);
+  elements.newDriverBtn.addEventListener('click', () => showNewDriverDialog());
   elements.cancelNewDriverBtn.addEventListener('click', closeNewDriverDialog);
   elements.newDriverForm.addEventListener('submit', createDriver);
   elements.newDriverOverlay.addEventListener('click', (event) => {
@@ -689,6 +924,10 @@ function init() {
   });
   elements.searchInput.addEventListener('input', (event) => {
     state.search = event.target.value.trim();
+    renderList();
+  });
+  elements.driverFilter.addEventListener('change', (event) => {
+    state.driverFilter = event.target.value;
     renderList();
   });
   elements.fitBtn.addEventListener('click', () => {

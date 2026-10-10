@@ -39,6 +39,11 @@
         <div class="search-wrap">
           <input id="searchInput" type="text" placeholder="Search driver" aria-label="Search driver" />
         </div>
+        <select id="driverFilter" aria-label="Filter drivers">
+          <option value="all">All</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
         <button id="newDriverBtn" class="btn" type="button">New driver</button>
         <button id="fitBtn" class="btn" type="button">Fit all</button>
       </div>
@@ -52,6 +57,24 @@
         <input id="newDriverName" name="name" type="text" minlength="1" maxlength="100" required />
         <label for="newDriverPhone">Phone</label>
         <input id="newDriverPhone" name="phone" type="tel" minlength="5" maxlength="20" required />
+        <fieldset class="vehicle-fields">
+          <legend>Vehicle</legend>
+          <label for="newDriverTaxiNumber">Taxi number</label>
+          <input id="newDriverTaxiNumber" name="taxi_number" type="text" minlength="1" maxlength="50" required />
+          <label for="newDriverPlate">Plate</label>
+          <input
+            id="newDriverPlate"
+            name="plate_number"
+            type="text"
+            minlength="1"
+            maxlength="50"
+            pattern="\s*[A-Za-z0-9](?:[A-Za-z0-9 -]{0,48}[A-Za-z0-9])?\s*"
+            title="Use letters, numbers, spaces, and hyphens; the plate must start and end with a letter or number."
+            required
+          />
+          <label for="newDriverModel">Model</label>
+          <input id="newDriverModel" name="type" type="text" maxlength="50" />
+        </fieldset>
         <div id="newDriverError" class="error" role="alert" aria-live="polite"></div>
         <div class="dialog-actions">
           <button id="cancelNewDriverBtn" class="btn secondary" type="button">Cancel</button>
