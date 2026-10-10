@@ -19,6 +19,19 @@ export interface ApiResponse {
   ignored?: string;
 }
 
+export type QueuedLocationPayload = LocationPayload & { recorded_at: number };
+
+export interface LocationBatchRequest {
+  points: QueuedLocationPayload[];
+}
+
+export interface LocationBatchResponse {
+  accepted: number;
+  duplicates: number;
+  rejected: number;
+  rejections: Array<{ index: number; reason: string }>;
+}
+
 const REQUEST_TIMEOUT_MS = 10000;
 
 export class ApiError extends Error {
@@ -38,9 +51,9 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler): void {
   unauthorizedHandler = handler;
 }
 
-export async function postJson<T extends ApiResponse>(
-  path: '/status' | '/location',
-  body: StatusPayload | LocationPayload,
+export async function postJson<T>(
+  path: '/status' | '/location' | '/location/batch',
+  body: StatusPayload | LocationPayload | LocationBatchRequest,
 ): Promise<T> {
   const token = await AsyncStorage.getItem('driver_token');
   if (!token) {

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
   StyleSheet,
   Text,
@@ -10,6 +11,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { locationQueue } from '../location/queue';
+import { stopLocationTracking } from '../location/tracker';
 
 interface Props {
   onTokenSaved: (token: string) => void;
@@ -27,11 +30,17 @@ export function TokenEntryScreen({ onTokenSaved }: Props) {
 
     setSaving(true);
     try {
+      await stopLocationTracking();
+      await locationQueue.clear();
+      await AsyncStorage.setItem('driver_online', 'false');
       await AsyncStorage.setItem('driver_token', normalizedToken);
       Keyboard.dismiss();
       onTokenSaved(normalizedToken);
-    } catch (error) {
-      console.warn('Unable to save driver token:', error);
+    } catch {
+      Alert.alert(
+        'Unable to prepare this device',
+        'Saved locations could not be cleared safely. Try again before saving a driver token.',
+      );
     } finally {
       setSaving(false);
     }

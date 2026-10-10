@@ -5,6 +5,8 @@ import React, { useEffect, useState } from 'react';
 import { Alert, StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { setUnauthorizedHandler } from './src/api/client';
+import { locationQueue } from './src/location/queue';
+import { stopLocationTracking } from './src/location/tracker';
 import { TokenEntryScreen } from './src/screens/TokenEntryScreen';
 import { MainScreen } from './src/screens/MainScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -30,15 +32,68 @@ function AppNavigation() {
 
   useEffect(() => {
     setUnauthorizedHandler(async () => {
-      await AsyncStorage.removeItem('driver_token');
+      let cleanupIssue = false;
+      try {
+        await stopLocationTracking();
+      } catch {
+        cleanupIssue = true;
+      }
+      try {
+        await locationQueue.clear();
+      } catch {
+        cleanupIssue = true;
+      }
+      try {
+        await AsyncStorage.setItem('driver_online', 'false');
+      } catch {
+        cleanupIssue = true;
+      }
+      try {
+        await AsyncStorage.removeItem('driver_token');
+      } catch {
+        cleanupIssue = true;
+      }
       Alert.alert(
         'Invalid driver token',
-        'Your token was rejected. Please check it with your admin and enter it again.',
+        cleanupIssue
+          ? 'Your token was rejected. Location data could not be fully cleared; it will be cleared before another token is saved.'
+          : 'Your token was rejected. Please check it with your admin and enter it again.',
       );
       setToken(null);
     });
     return () => setUnauthorizedHandler(null);
   }, []);
+
+  const logout = async () => {
+    let cleanupIssue = false;
+    try {
+      await stopLocationTracking();
+    } catch {
+      cleanupIssue = true;
+    }
+    try {
+      await locationQueue.clear();
+    } catch {
+      cleanupIssue = true;
+    }
+    try {
+      await AsyncStorage.setItem('driver_online', 'false');
+    } catch {
+      cleanupIssue = true;
+    }
+    try {
+      await AsyncStorage.removeItem('driver_token');
+    } catch {
+      cleanupIssue = true;
+    }
+    if (cleanupIssue) {
+      Alert.alert(
+        'Logout cleanup incomplete',
+        'Tracking or saved locations could not be fully cleared. They will be cleared before another token is saved.',
+      );
+    }
+    setToken(null);
+  };
 
   if (loading) {
     return null;
@@ -58,10 +113,7 @@ function AppNavigation() {
               {({ navigation }) => (
                 <SettingsScreen
                   onBack={() => navigation.goBack()}
-                  onLogout={async () => {
-                    await AsyncStorage.removeItem('driver_token');
-                    setToken(null);
-                  }}
+                  onLogout={logout}
                 />
               )}
             </Stack.Screen>

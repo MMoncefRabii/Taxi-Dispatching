@@ -205,6 +205,13 @@ class Vehicle(Base):
 
 class DriverLocation(Base):
     __tablename__ = "driver_locations"
+    __table_args__ = (
+        UniqueConstraint(
+            "driver_id",
+            "recorded_at",
+            name="uq_driver_locations_driver_recorded_at",
+        ),
+    )
     id: Mapped[uuid.UUID] = uuid_pk()
     center_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("centers.id"), nullable=False, index=True)
     driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False, index=True)
