@@ -193,6 +193,12 @@ def test_unconfigured_origin_does_not_get_cors_access():
             None,
         ),
         ("get", "/admin/me", None),
+        ("get", "/admin/admins", None),
+        (
+            "post",
+            "/admin/admins/00000000-0000-0000-0000-000000000001/deactivate",
+            None,
+        ),
     ],
 )
 @pytest.mark.usefixtures("mock_db")
@@ -203,6 +209,124 @@ def test_admin_routes_require_session(monkeypatch, method, path, json):
         response = client.request(method, path, json=json)
 
     assert response.status_code == 401
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_list_admins_is_center_scoped_and_returns_only_safe_fields(
+    monkeypatch, mock_db
+):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    use_admin_dependency(admin)
+    row = make_admin()
+    row.center_id = admin.center_id
+    row.created_at = datetime.now(timezone.utc)
+    row.last_login = None
+    row.deactivated_at = None
+    mock_db.execute.return_value.scalars.return_value.all.return_value = [row]
+
+    with TestClient(main.app) as client:
+        response = client.get("/admin/admins?limit=7&offset=3")
+
+    assert response.status_code == 200
+    assert response.json() == [{
+        "id": str(row.id),
+        "email": row.email,
+        "active": row.active,
+        "created_at": row.created_at.isoformat(),
+        "last_login": None,
+        "deactivated_at": None,
+        "is_self": False,
+    }]
+    query = mock_db.execute.await_args.args[0]
+    compiled = query.compile()
+    assert "admins.center_id =" in str(compiled)
+    assert str(admin.center_id) in str(compiled.params.values())
+    assert query._limit_clause.value == 7
+    assert query._offset_clause.value == 3
+    assert "password_hash" not in response.text
+    assert "session" not in response.text
+
+
+@pytest.mark.parametrize("limit", [0, 201, 500])
+@pytest.mark.usefixtures("mock_db")
+def test_list_admins_rejects_out_of_range_limit(monkeypatch, mock_db, limit):
+    set_app_env(monkeypatch, "development")
+    use_admin_dependency(make_admin())
+
+    with TestClient(main.app) as client:
+        response = client.get(f"/admin/admins?limit={limit}")
+
+    assert response.status_code == 422
+    mock_db.execute.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_list_admins_defaults_to_fifty(monkeypatch, mock_db):
+    set_app_env(monkeypatch, "development")
+    use_admin_dependency(make_admin())
+    mock_db.execute.return_value.scalars.return_value.all.return_value = []
+
+    with TestClient(main.app) as client:
+        response = client.get("/admin/admins")
+
+    assert response.status_code == 200
+    assert mock_db.execute.await_args.args[0]._limit_clause.value == 50
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [
+        (main.AdminNotFoundError(), 404),
+        (main.SelfDeactivationError(), 409),
+        (main.LastActiveAdminError(), 409),
+    ],
+)
+@pytest.mark.usefixtures("mock_db")
+def test_deactivate_admin_returns_generic_scoped_errors(
+    monkeypatch, mock_db, error, status
+):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    use_admin_dependency(admin)
+    target_id = uuid.uuid4()
+    helper = AsyncMock(side_effect=error)
+    monkeypatch.setattr(main, "deactivate_admin_in_transaction", helper)
+
+    with TestClient(main.app) as client:
+        response = client.post(f"/admin/admins/{target_id}/deactivate")
+
+    assert response.status_code == status
+    assert response.json()["detail"] in {
+        "Admin not found",
+        "Unable to deactivate admin",
+    }
+    assert str(target_id) not in response.text
+    helper.assert_awaited_once_with(
+        mock_db,
+        target_id,
+        center_id=admin.center_id,
+        actor_admin_id=admin.id,
+    )
+    mock_db.rollback.assert_awaited_once()
+    mock_db.commit.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_deactivate_admin_commits_success(monkeypatch, mock_db):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    use_admin_dependency(admin)
+    target_id = uuid.uuid4()
+    helper = AsyncMock(return_value=True)
+    monkeypatch.setattr(main, "deactivate_admin_in_transaction", helper)
+
+    with TestClient(main.app) as client:
+        response = client.post(f"/admin/admins/{target_id}/deactivate")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "changed": True}
+    mock_db.commit.assert_awaited_once()
 
 
 @pytest.mark.usefixtures("mock_db")
@@ -458,7 +582,7 @@ def test_deactivate_admin_updates_admin_and_revokes_sessions(monkeypatch, capsys
     assert session.begin.call_count == 1
     assert session.transaction.exception is None
     assert session.execute.await_count == 3
-    assert session.scalar.await_count == 1
+    assert session.scalar.await_count == 2
     revoke_query = session.execute.await_args_list[2].args[0]
     assert "UPDATE admin_sessions SET revoked_at" in str(revoke_query.compile())
     assert "admin_sessions.revoked_at IS NULL" in str(revoke_query.compile())
@@ -466,12 +590,74 @@ def test_deactivate_admin_updates_admin_and_revokes_sessions(monkeypatch, capsys
     assert capsys.readouterr().out == ""
 
 
+def test_shared_admin_deactivation_revokes_sessions_and_audits_without_secrets():
+    admin = make_admin()
+    actor_id = uuid.uuid4()
+    session = FakeSession(
+        execute_results=[
+            scalar_result(admin),
+            Mock(),
+            Mock(),
+        ],
+        scalar_result_value=2,
+    )
+    session.add = Mock()
+
+    changed = asyncio.run(
+        main.deactivate_admin_in_transaction(
+            session,
+            admin.id,
+            center_id=admin.center_id,
+            actor_admin_id=actor_id,
+        )
+    )
+
+    assert changed is True
+    assert admin.active is False
+    assert admin.deactivated_at.tzinfo == timezone.utc
+    assert session.execute.await_count == 3
+    revoke_query = session.execute.await_args_list[2].args[0]
+    assert "admin_sessions.revoked_at IS NULL" in str(revoke_query.compile())
+    assert "token_hash" not in str(revoke_query.compile())
+    audit = session.add.call_args.args[0]
+    assert isinstance(audit, AuditLog)
+    assert audit.actor_admin_id == actor_id
+    assert audit.center_id == admin.center_id
+    assert audit.action == "admin.deactivate"
+    assert audit.before_state == {"active": True}
+    assert audit.after_state == {"active": False}
+    audit_values = repr((audit.before_state, audit.after_state))
+    assert admin.email not in audit_values
+    assert admin.password_hash not in audit_values
+
+
+def test_shared_admin_deactivation_refuses_self():
+    admin = make_admin()
+    session = FakeSession(execute_results=[scalar_result(admin)])
+
+    with pytest.raises(main.SelfDeactivationError):
+        asyncio.run(
+            main.deactivate_admin_in_transaction(
+                session,
+                admin.id,
+                center_id=admin.center_id,
+                actor_admin_id=admin.id,
+            )
+        )
+
+    session.scalar.assert_not_awaited()
+    assert session.execute.await_count == 1
+
+
 def test_deactivate_admin_already_inactive_makes_no_changes(monkeypatch, capsys):
     admin = make_admin()
     admin.active = False
     original_deactivated_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
     admin.deactivated_at = original_deactivated_at
-    session = FakeSession(execute_results=[scalar_result(admin)])
+    session = FakeSession(
+        execute_results=[scalar_result(admin)],
+        scalar_result_value=admin.id,
+    )
     monkeypatch.setattr(deactivate_admin_script, "SessionLocal", lambda: session)
     monkeypatch.setattr(
         deactivate_admin_script,
@@ -490,7 +676,7 @@ def test_deactivate_admin_already_inactive_makes_no_changes(monkeypatch, capsys)
     assert admin.active is False
     assert admin.deactivated_at is original_deactivated_at
     assert session.execute.await_count == 1
-    session.scalar.assert_not_awaited()
+    session.scalar.assert_awaited_once()
     assert "Admin is already inactive; no changes made." in capsys.readouterr().out
 
 

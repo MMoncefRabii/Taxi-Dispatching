@@ -55,6 +55,8 @@ python -m scripts.deactivate_admin --email admin@example.com
 
 Deactivation marks the admin inactive, records the UTC deactivation time, and revokes its non-revoked sessions in one transaction. It refuses to deactivate the last active admin of a center. Re-running it for an already inactive admin makes no changes. Both admin seed and deactivation commands leave existing rows in place.
 
+Run the fake driver simulator from `backend/` with `python fake_driver.py`. It reads `FAKE_DRIVER_TOKEN` from the environment or prompts for the token using hidden input. Do not pass the token as a command-line argument.
+
 The default-center seed creates a center only when none exists. `WEB_ORIGINS` is a comma-separated allowlist used by the API for the separate admin frontend; for the default local frontend, set it to `http://localhost:5173`.
 
 Keep the backend command running in that terminal. The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs). The independent web frontend is served separately from the repository's `frontend/` directory; follow the frontend instructions in the root README.

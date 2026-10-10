@@ -1,65 +1,32 @@
 import argparse
 import asyncio
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db import SessionLocal, engine
-from app.models import Admin, AdminSession, Center
-
-
-class AdminDeactivationError(Exception):
-    pass
+from app.admin_management import (
+    AdminDeactivationError,
+    AdminNotFoundError,
+    deactivate_admin_in_transaction,
+)
+from app.models import Admin
 
 
 async def deactivate_admin(email: str) -> bool:
     normalized_email = email.strip().lower()
     async with SessionLocal() as session:
         async with session.begin():
-            result = await session.execute(
-                select(Admin)
-                .where(func.lower(Admin.email) == normalized_email)
-                .with_for_update()
+            admin_id = await session.scalar(
+                select(Admin.id).where(func.lower(Admin.email) == normalized_email)
             )
-            admin = result.scalar_one_or_none()
-            if admin is None:
-                raise AdminDeactivationError(f"No admin found for email {email}.")
-            if not admin.active:
-                return False
-
-            await session.execute(
-                select(Center.id)
-                .where(Center.id == admin.center_id)
-                .with_for_update()
-            )
-            active_admin_count = await session.scalar(
-                select(func.count(Admin.id)).where(
-                    Admin.center_id == admin.center_id,
-                    Admin.active.is_(True),
-                )
-            )
-            if active_admin_count <= 1:
-                raise AdminDeactivationError(
-                    "Cannot deactivate the last active admin of this center."
-                )
-
-            now = datetime.now(timezone.utc)
-            admin.active = False
-            admin.deactivated_at = now
-            await session.execute(
-                update(AdminSession)
-                .where(
-                    AdminSession.admin_id == admin.id,
-                    AdminSession.revoked_at.is_(None),
-                )
-                .values(revoked_at=now)
-            )
-    return True
+            if admin_id is None:
+                raise AdminNotFoundError(f"No admin found for email {email}.")
+            return await deactivate_admin_in_transaction(session, admin_id)
 
 
 async def deactivate_and_dispose(email: str) -> bool:

@@ -29,25 +29,36 @@
 
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-header">
-        <strong>Drivers</strong>
+        <strong>Fleet</strong>
         <div style="display:flex;gap:8px;align-items:center;">
           <button id="collapseBtn" class="sidebar-toggle" type="button" aria-label="Collapse sidebar">☰</button>
           <button id="logoutBtn" class="btn secondary" type="button">Log out</button>
         </div>
       </div>
-      <div class="toolbar">
-        <div class="search-wrap">
-          <input id="searchInput" type="text" placeholder="Search driver" aria-label="Search driver" />
+      <nav class="view-tabs" aria-label="Dashboard views">
+        <button id="driversViewBtn" class="view-tab selected" type="button" aria-selected="true">Drivers</button>
+        <button id="adminsViewBtn" class="view-tab" type="button" aria-selected="false">Admins</button>
+      </nav>
+      <div id="driversView">
+        <div class="toolbar">
+          <div class="search-wrap">
+            <input id="searchInput" type="text" placeholder="Search driver" aria-label="Search driver" />
+          </div>
+          <select id="driverFilter" aria-label="Filter drivers">
+            <option value="all">All</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <button id="newDriverBtn" class="btn" type="button">New driver</button>
+          <button id="fitBtn" class="btn" type="button">Fit all</button>
         </div>
-        <select id="driverFilter" aria-label="Filter drivers">
-          <option value="all">All</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-        </select>
-        <button id="newDriverBtn" class="btn" type="button">New driver</button>
-        <button id="fitBtn" class="btn" type="button">Fit all</button>
+        <div id="driverList" class="list"></div>
       </div>
-      <div id="driverList" class="list"></div>
+      <section id="adminsView" class="admins-view" hidden aria-label="Center admins">
+        <div id="adminsError" class="error" role="alert" aria-live="polite"></div>
+        <div id="adminList" class="admin-list"></div>
+        <button id="loadMoreAdminsBtn" class="btn secondary" type="button" hidden>Load more admins</button>
+      </section>
     </aside>
 
     <div id="newDriverOverlay" class="dialog-overlay" hidden>

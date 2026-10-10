@@ -35,6 +35,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.admin_management import (
+    AdminDeactivationError,
+    AdminNotFoundError,
+    LastActiveAdminError,
+    SelfDeactivationError,
+    deactivate_admin_in_transaction,
+)
 from app.config import settings
 from app.db import engine, get_db
 from app.locations import (
@@ -589,6 +596,63 @@ async def admin_me(
         "email": admin.email.lower(),
         "center_id": str(admin.center_id),
     }
+
+
+@app.get("/admin/admins")
+async def list_admins(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(require_admin),
+):
+    result = await db.execute(
+        select(Admin)
+        .where(Admin.center_id == admin.center_id)
+        .order_by(Admin.created_at, Admin.id)
+        .limit(limit)
+        .offset(offset)
+    )
+    return [
+        {
+            "id": str(row.id),
+            "email": row.email,
+            "active": row.active,
+            "created_at": row.created_at,
+            "last_login": row.last_login,
+            "deactivated_at": row.deactivated_at,
+            "is_self": row.id == admin.id,
+        }
+        for row in result.scalars().all()
+    ]
+
+
+@app.post("/admin/admins/{admin_id}/deactivate")
+async def deactivate_center_admin(
+    admin_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(require_admin),
+):
+    try:
+        changed = await deactivate_admin_in_transaction(
+            db,
+            admin_id,
+            center_id=admin.center_id,
+            actor_admin_id=admin.id,
+        )
+        await db.commit()
+    except AdminNotFoundError:
+        await db.rollback()
+        raise HTTPException(404, "Admin not found") from None
+    except (SelfDeactivationError, LastActiveAdminError):
+        await db.rollback()
+        raise HTTPException(409, "Unable to deactivate admin") from None
+    except AdminDeactivationError:
+        await db.rollback()
+        raise HTTPException(409, "Unable to deactivate admin") from None
+    except SQLAlchemyError:
+        await db.rollback()
+        raise HTTPException(500, "Unable to save admin changes") from None
+    return {"ok": True, "changed": changed}
 
 
 async def get_driver(token: str | None, db: AsyncSession) -> Driver:
