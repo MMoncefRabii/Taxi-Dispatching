@@ -60,3 +60,94 @@ The default-center seed creates a center only when none exists. `WEB_ORIGINS` is
 Keep the backend command running in that terminal. The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs). The independent web frontend is served separately from the repository's `frontend/` directory; follow the frontend instructions in the root README.
 
 The platform console can expose the allowlisted local development tasks when `DEV_TASKS_ENABLED=true` and `APP_ENV=development`. This is disabled by default, is refused in production, and starts no backend process. Use it only for local development; see the frontend README for the available console tasks.
+
+## PostgreSQL backups and restore checks
+
+The PowerShell scripts in `C:\td\scripts\backup` create PostgreSQL custom-format dumps from the `postgres` service in `backend\docker-compose.yml`. They run `pg_dump` and `pg_restore` inside the PostgreSQL container; no local PostgreSQL installation is needed. The scripts use the database user, database name, and password already set in the container environment. They do not print the password.
+
+Run these commands from the repository root in Windows PowerShell:
+
+```powershell
+.\scripts\backup\backup-db.ps1
+.\scripts\backup\restore-test.ps1
+```
+
+Backups default to `C:\td-backups`. To select another backup folder, pass `-BackupDir 'D:\fleet-backups'` to either script. Backup names are `fleet_YYYYMMDD_HHmmss.dump`; each dump has a neighboring `.sha256` checksum. The backup script checks that the dump is nonempty and readable by `pg_restore --list`. It retains the newest 14 dumps overall and the newest 8 dumps dated on Sundays. These sets are combined, so recent Sunday dumps may overlap. To preview retention deletions while creating a new verified backup, run:
+
+```powershell
+.\scripts\backup\backup-db.ps1 -WhatIf
+```
+
+`-WhatIf` previews only retention deletions; it still creates and verifies a backup. Retention only removes matching `fleet_*.dump` files and their corresponding `fleet_*.sha256` files from the selected backup folder. The script refuses to use a folder inside this Git repository.
+
+To tolerate concurrent writes to `driver_locations` while the restore test runs, specify a nonnegative row-count tolerance. No other table has a tolerance:
+
+```powershell
+.\scripts\backup\restore-test.ps1 -DriverLocationsTolerance 5
+```
+
+The restore test defaults to the newest dump in `C:\td-backups`. It recreates only the hard-coded `fleet_restore_test` database, restores the dump there, compares row counts for `drivers`, `driver_locations`, `admins`, `centers`, and `vehicles`, then drops `fleet_restore_test`. Do not use that database for other data; it is intentionally disposable. This test never restores to the live database.
+
+### Scheduling
+
+Register a daily Windows Scheduled Task, defaulting to 02:00:
+
+```powershell
+.\scripts\backup\register-backup-task.ps1
+```
+
+Set another local time using `-Time HH:mm`, for example `-Time '03:30'`. The scheduled task is named `FleetBackup` and is configured to start when available if a scheduled run was missed while the PC was off. Remove it with:
+
+```powershell
+.\scripts\backup\register-backup-task.ps1 -Unregister
+```
+
+The task uses the registering user's interactive Windows session. It can run only when that user is logged in, the PC is on, Docker Desktop and the PostgreSQL container are running, and the user can access Docker.
+
+### Manually restoring into a new database
+
+Choose a new database name that does not already exist. The following example restores a selected dump into `fleet_manual_restore`, not the live `fleet_tracker` database. Run from the repository root:
+
+```powershell
+$container = (docker compose -f .\backend\docker-compose.yml ps -q postgres).Trim()
+if (-not $container) { throw 'The postgres container is not running.' }
+$dump = 'C:\td-backups\fleet_YYYYMMDD_HHmmss.dump'
+docker cp $dump "${container}:/tmp/fleet_manual_restore.dump"
+if ($LASTEXITCODE -ne 0) { throw 'Could not copy the dump into the container.' }
+docker exec $container createdb -U fleet_tracker --owner=fleet_tracker fleet_manual_restore
+if ($LASTEXITCODE -ne 0) { throw 'Could not create the new restore database.' }
+docker exec $container pg_restore -U fleet_tracker --no-owner --no-privileges -d fleet_manual_restore /tmp/fleet_manual_restore.dump
+if ($LASTEXITCODE -ne 0) { throw 'Restore into fleet_manual_restore failed.' }
+docker exec $container rm -f /tmp/fleet_manual_restore.dump
+```
+
+Replace the example dump filename with an existing dump. This manual procedure assumes the container's configured user is `fleet_tracker`. Verify the new database before using it. Remove it only after confirming its contents are no longer needed.
+
+### Warning: restoring over the live database
+
+The scripts never restore over the live database. Restoring over `fleet_tracker` is a separate, manual and destructive operation; do not point the restore-test script at it. Before any deliberate live restore:
+
+1. Stop the backend process (for example, press `Ctrl+C` in the terminal running Uvicorn).
+2. While PostgreSQL is running, create a fresh backup and verify both its dump and checksum:
+
+   ```powershell
+   .\scripts\backup\backup-db.ps1
+   $dump = (Get-ChildItem C:\td-backups\fleet_*.dump | Sort-Object Name -Descending | Select-Object -First 1).FullName
+   if (-not $dump) { throw 'No backup dump was created.' }
+   $expectedHash = (Get-Content "$dump.sha256").Split()[0]
+   $actualHash = (Get-FileHash $dump -Algorithm SHA256).Hash.ToLowerInvariant()
+   if ($actualHash -ne $expectedHash) { throw 'Backup checksum does not match.' }
+   $container = (docker compose -f .\backend\docker-compose.yml ps -q postgres).Trim()
+   if (-not $container) { throw 'The postgres container is not running.' }
+   docker cp $dump "${container}:/tmp/fleet_fresh_before_live_restore.dump"
+   if ($LASTEXITCODE -ne 0) { throw 'Could not copy the fresh backup into the container.' }
+   docker exec $container pg_restore --list /tmp/fleet_fresh_before_live_restore.dump | Out-Null
+   if ($LASTEXITCODE -ne 0) { throw 'The fresh backup is not readable.' }
+   docker exec $container rm -f /tmp/fleet_fresh_before_live_restore.dump
+   ```
+
+3. Proceed only if the checksum matches and `pg_restore --list` succeeds. The backup script also performs the readability check before copying the dump out.
+4. Only after verifying the recovery point and confirming the target is `fleet_tracker`, deliberately run the separately chosen live-restore procedure. This step can replace live data; the backup and restore-test scripts do not automate it.
+5. Confirm the restored database before restarting the backend.
+
+Backups stored on the same disk do not protect against disk failure. Keep an encrypted copy on a separate machine or other off-machine storage.
