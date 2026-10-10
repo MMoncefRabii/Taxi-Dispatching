@@ -60,3 +60,26 @@ The default-center seed creates a center only when none exists. `WEB_ORIGINS` is
 Keep the backend command running in that terminal. The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs). The independent web frontend is served separately from the repository's `frontend/` directory; follow the frontend instructions in the root README.
 
 The platform console can expose the allowlisted local development tasks when `DEV_TASKS_ENABLED=true` and `APP_ENV=development`. This is disabled by default, is refused in production, and starts no backend process. Use it only for local development; see the frontend README for the available console tasks.
+
+## Real-PostgreSQL integration tests
+
+The `backend/tests_integration/` tests are not collected unless
+`INTEGRATION_DB_ENABLED=true`; they are not skipped when the flag is off. From
+the repository root, activate the project venv, make sure the existing
+PostgreSQL container is running, and run:
+
+```powershell
+Set-Location C:\td\backend
+$env:INTEGRATION_DB_ENABLED = "true"
+$env:DEV_TASKS_ENABLED = "false"
+pytest tests_integration
+```
+
+The fixture requires the configured PostgreSQL URL to target `fleet_tracker`,
+uses its connection settings only for the hard-coded `fleet_integration_test`
+database, and refuses to run if the expected single `postgres` container is
+not running. It creates that database with `docker exec`, upgrades it to head,
+tests the new migration's downgrade and re-upgrade on the fresh schema, and
+drops only `fleet_integration_test` after the run. If that database already
+exists, setup fails rather than deleting it. The integration flag must remain
+off for the regular mocked suite.

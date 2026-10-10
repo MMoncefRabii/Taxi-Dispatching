@@ -764,6 +764,7 @@ def test_admin_creates_driver_in_session_center_not_body_center(
         if isinstance(item, AuditLog)
     )
     assert created_driver.center_id == admin.center_id
+    assert created_vehicle.center_id == admin.center_id
     assert created_vehicle.driver_id == created_driver.id
     assert created_vehicle.plate_number == "AB 123"
     assert created_vehicle.type == "Sedan"
@@ -835,6 +836,9 @@ def test_create_driver_rolls_back_driver_when_vehicle_insert_fails(
     assert any(isinstance(item, AuditLog) for item in added)
     mock_db.rollback.assert_awaited_once()
     mock_db.commit.assert_not_awaited()
+    assert response.json()["detail"] == (
+        "Vehicle number or plate already in use in your center"
+    )
     assert "token" not in response.text
     assert "token_hash" not in response.text
 
@@ -860,6 +864,7 @@ def test_edit_driver_changes_only_provided_fields(monkeypatch, mock_db):
     use_admin_dependency(admin)
     vehicle = Vehicle(
         id=uuid.uuid4(),
+        center_id=admin.center_id,
         driver_id=uuid.uuid4(),
         taxi_number="TX-1",
         plate_number="OLD 123",
@@ -887,6 +892,7 @@ def test_edit_driver_changes_only_provided_fields(monkeypatch, mock_db):
     assert driver.name == "Updated"
     assert driver.phone == "55500001"
     assert vehicle.taxi_number == "TX-1"
+    assert vehicle.center_id == admin.center_id
     assert vehicle.plate_number == "XY 456"
     assert vehicle.type == "Sedan"
     assert isinstance(mock_db.add.call_args.args[0], AuditLog)

@@ -192,9 +192,24 @@ class Driver(Base):
 
 class Vehicle(Base):
     __tablename__ = "vehicles"
+    __table_args__ = (
+        UniqueConstraint(
+            "center_id",
+            "taxi_number",
+            name="uq_vehicles_center_taxi_number",
+        ),
+        UniqueConstraint(
+            "center_id",
+            "plate_number",
+            name="uq_vehicles_center_plate_number",
+        ),
+    )
     id: Mapped[uuid.UUID] = uuid_pk()
+    center_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("centers.id"), nullable=False, index=True
+    )
     driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False, unique=True, index=True)
-    taxi_number: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    taxi_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     plate_number: Mapped[str] = mapped_column(String(50), nullable=False)
     type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
