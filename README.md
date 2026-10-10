@@ -23,8 +23,12 @@ The FastAPI service in `backend/main.py` implements:
 | `POST /admin/login` | Authenticate an admin with email and password; sets an eight-hour session cookie. |
 | `POST /admin/logout` | Revoke the current admin session and clear its cookie. |
 | `GET /admin/me` | Return the authenticated admin's email and center ID. |
-| `POST /admin/drivers` | Create a driver using the authenticated admin session; returns the driver's token. |
-| `GET /admin/drivers/latest` | Return drivers and their latest known position; requires an admin session. |
+| `POST /admin/drivers` | Create a driver and vehicle using the authenticated admin session; returns the driver's token once. |
+| `PATCH /admin/drivers/{driver_id}` | Edit a driver and/or vehicle within the authenticated admin's center. |
+| `POST /admin/drivers/{driver_id}/deactivate` | Deactivate a driver and immediately invalidate its token. |
+| `POST /admin/drivers/{driver_id}/reactivate` | Reactivate a driver and return a new one-time token. |
+| `POST /admin/drivers/{driver_id}/token` | Replace the token for an active driver and return it once. |
+| `GET /admin/drivers/latest` | Return center-scoped drivers, active state, vehicles, and latest known positions; requires an admin session. |
 | `POST /status` | Set a driver's online flag; requires the driver's `x-token`. |
 | `POST /location` | Validate and store a driver's location; requires `x-token`. Locations with accuracy over 50 m are ignored with `{"ok": false, "ignored": "low accuracy"}`. |
 | `WS /ws` | Stream driver status and accepted location events to authenticated dashboard clients. |
@@ -33,7 +37,7 @@ The interactive API documentation is available at `/docs` when the backend is ru
 
 ### Admin Dashboard
 
-The standalone browser dashboard lives in `frontend/`. It uses HTML, CSS, vanilla JavaScript, Leaflet, and OpenStreetMap tiles to show drivers with known coordinates, a driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. Admins can create drivers from the dashboard; the new driver's token is shown once and must be given to the driver then. The dashboard receives WebSocket updates and refreshes the driver list periodically. Dashboard access uses per-admin email/password accounts and an eight-hour HTTP-only session cookie. Its API address is configured independently in `frontend/src/config.js`.
+The standalone browser dashboard lives in `frontend/`. It uses HTML, CSS, vanilla JavaScript, Leaflet, and OpenStreetMap tiles to show drivers with known coordinates, a driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. Admins can create drivers with vehicles, edit details, deactivate/reactivate drivers, and regenerate active-driver tokens. Reactivation and regeneration tokens are shown once and must be given to the driver then. The dashboard receives WebSocket updates and refreshes the driver list periodically. Dashboard access uses per-admin email/password accounts and an eight-hour HTTP-only session cookie. Its API address is configured independently in `frontend/src/config.js`.
 
 ### Driver App
 
@@ -129,7 +133,12 @@ In the backend's `/docs`, use `POST /admin/login` with the seeded admin email an
 ```json
 {
   "name": "Test Driver",
-  "phone": "20000000"
+  "phone": "20000000",
+  "vehicle": {
+    "taxi_number": "TX-1",
+    "plate_number": "AB 123",
+    "type": "Sedan"
+  }
 }
 ```
 

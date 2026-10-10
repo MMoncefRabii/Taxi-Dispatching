@@ -17,11 +17,12 @@ import pytest
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
+from sqlalchemy.exc import IntegrityError
 
 import main
 from app.config import Settings, settings
 from app.db import get_db
-from app.models import Admin, AdminSession, Driver, DriverLocation
+from app.models import Admin, AdminSession, AuditLog, Driver, DriverLocation, Vehicle
 
 
 @pytest.fixture
@@ -34,7 +35,9 @@ def mock_db():
         )
     )
     db.add = Mock()
+    db.flush = AsyncMock()
     db.commit = AsyncMock()
+    db.rollback = AsyncMock()
     main.app.dependency_overrides[get_db] = lambda: db
     main.clients.clear()
     yield db
@@ -124,6 +127,21 @@ def test_frontend_origin_gets_credentialed_cors_access():
     assert response.headers["access-control-allow-credentials"] == "true"
 
 
+def test_frontend_origin_gets_patch_cors_access():
+    with TestClient(main.app) as client:
+        response = client.options(
+            "/admin/drivers/00000000-0000-0000-0000-000000000001",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "PATCH",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+    assert response.status_code == 200
+    assert "PATCH" in response.headers["access-control-allow-methods"]
+
+
 def test_unconfigured_origin_does_not_get_cors_access():
     with TestClient(main.app) as client:
         response = client.options(
@@ -141,7 +159,39 @@ def test_unconfigured_origin_does_not_get_cors_access():
     ("method", "path", "json"),
     [
         ("get", "/admin/drivers/latest", None),
-        ("post", "/admin/drivers", {"name": "Test Driver", "phone": "55500001"}),
+        (
+            "post",
+            "/admin/drivers",
+            {
+                "name": "Test Driver",
+                "phone": "55500001",
+                "vehicle": {
+                    "taxi_number": "TX-1",
+                    "plate_number": "AB 123",
+                    "type": "Sedan",
+                },
+            },
+        ),
+        (
+            "patch",
+            "/admin/drivers/00000000-0000-0000-0000-000000000001",
+            {"name": "Edited"},
+        ),
+        (
+            "post",
+            "/admin/drivers/00000000-0000-0000-0000-000000000001/deactivate",
+            None,
+        ),
+        (
+            "post",
+            "/admin/drivers/00000000-0000-0000-0000-000000000001/reactivate",
+            None,
+        ),
+        (
+            "post",
+            "/admin/drivers/00000000-0000-0000-0000-000000000001/token",
+            None,
+        ),
         ("get", "/admin/me", None),
     ],
 )
@@ -604,7 +654,7 @@ def test_websocket_rejects_wrong_origin(monkeypatch):
 
 
 @pytest.mark.usefixtures("mock_db")
-def test_admin_lists_only_drivers_in_session_center(monkeypatch, mock_db):
+def test_admin_lists_only_drivers_in_session_center(monkeypatch, mock_db, caplog):
     set_app_env(monkeypatch, "development")
     token = "center-a-session"
     admin = make_admin()
@@ -616,13 +666,32 @@ def test_admin_lists_only_drivers_in_session_center(monkeypatch, mock_db):
         name="Center A Driver",
         phone="55500001",
         token_hash="driver-a-hash",
+        active=False,
         online=False,
+        deactivated_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
     )
     admin_session = make_admin_session(admin, token)
     mock_db.execute.side_effect = [
         scalar_result(admin_session),
         scalar_result(admin),
-        Mock(all=Mock(return_value=[(driver_a, None, None, None, None, None, None)])),
+        Mock(
+            all=Mock(
+                return_value=[
+                    (
+                        driver_a,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "TX-A",
+                        "AB 123",
+                        "Sedan",
+                    )
+                ]
+            )
+        ),
     ]
 
     with TestClient(main.app) as client:
@@ -631,6 +700,17 @@ def test_admin_lists_only_drivers_in_session_center(monkeypatch, mock_db):
 
     assert response.status_code == 200
     assert [row["name"] for row in response.json()] == ["Center A Driver"]
+    assert response.json()[0]["active"] is False
+    assert response.json()[0]["deactivated_at"] == "2025-01-01T00:00:00+00:00"
+    assert response.json()[0]["online"] == 0
+    assert response.json()[0]["vehicle"] == {
+        "taxi_number": "TX-A",
+        "plate_number": "AB 123",
+        "type": "Sedan",
+    }
+    assert "token_hash" not in response.text
+    assert "driver-a-hash" not in response.text
+    assert "driver-a-hash" not in caplog.text
     query = mock_db.execute.await_args_list[2].args[0]
     compiled = query.compile()
     assert "drivers.center_id" in str(compiled)
@@ -640,7 +720,9 @@ def test_admin_lists_only_drivers_in_session_center(monkeypatch, mock_db):
 
 
 @pytest.mark.usefixtures("mock_db")
-def test_admin_creates_driver_in_session_center_not_body_center(monkeypatch, mock_db):
+def test_admin_creates_driver_in_session_center_not_body_center(
+    monkeypatch, mock_db, caplog
+):
     set_app_env(monkeypatch, "development")
     token = "center-a-session"
     admin = make_admin()
@@ -657,14 +739,425 @@ def test_admin_creates_driver_in_session_center_not_body_center(monkeypatch, moc
             json={
                 "name": "Center A Driver",
                 "phone": "55500001",
-                "center_id": str(center_b),
+                "vehicle": {
+                    "taxi_number": "TX-A",
+                    "plate_number": " ab 123 ",
+                    "type": "Sedan",
+                },
             },
         )
 
     assert response.status_code == 200
-    created_driver = mock_db.add.call_args.args[0]
-    assert isinstance(created_driver, Driver)
+    created_driver = next(
+        item
+        for item in (call.args[0] for call in mock_db.add.call_args_list)
+        if isinstance(item, Driver)
+    )
+    created_vehicle = next(
+        item
+        for item in (call.args[0] for call in mock_db.add.call_args_list)
+        if isinstance(item, Vehicle)
+    )
+    audit_log = next(
+        item
+        for item in (call.args[0] for call in mock_db.add.call_args_list)
+        if isinstance(item, AuditLog)
+    )
     assert created_driver.center_id == admin.center_id
+    assert created_vehicle.driver_id == created_driver.id
+    assert created_vehicle.plate_number == "AB 123"
+    assert created_vehicle.type == "Sedan"
+    assert response.json()["vehicle"]["plate_number"] == "AB 123"
+    assert created_driver.center_id != center_b
+    assert audit_log.center_id == admin.center_id
+    assert audit_log.actor_admin_id == admin.id
+    assert audit_log.action == "driver.create"
+    assert audit_log.entity_id == created_driver.id
+    assert "phone" not in (audit_log.after_state or {})
+    assert "token" not in str(audit_log.after_state).lower()
+    assert "token_hash" not in str(audit_log.after_state).lower()
+    assert "token_hash" not in response.text
+    assert response.json()["token"] not in caplog.text
+    assert created_driver.token_hash not in caplog.text
+
+
+def _new_driver_payload(**overrides):
+    body = {
+        "name": "Test Driver",
+        "phone": "55500001",
+        "vehicle": {
+            "taxi_number": "TX-1",
+            "plate_number": "AB 123",
+            "type": "Sedan",
+        },
+    }
+    body.update(overrides)
+    return body
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_create_driver_rejects_invalid_plate_and_extra_fields(
+    monkeypatch, mock_db
+):
+    set_app_env(monkeypatch, "development")
+    use_admin_dependency(make_admin())
+    invalid_plate = _new_driver_payload()
+    invalid_plate["vehicle"]["plate_number"] = "AB/123"
+    extra_field = _new_driver_payload(center_id=str(uuid.uuid4()))
+
+    with TestClient(main.app) as client:
+        bad_plate_response = client.post("/admin/drivers", json=invalid_plate)
+        extra_field_response = client.post("/admin/drivers", json=extra_field)
+
+    assert bad_plate_response.status_code == 422
+    assert extra_field_response.status_code == 422
+    mock_db.add.assert_not_called()
+    mock_db.flush.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_create_driver_rolls_back_driver_when_vehicle_insert_fails(
+    monkeypatch, mock_db
+):
+    set_app_env(monkeypatch, "development")
+    use_admin_dependency(make_admin())
+    mock_db.flush.side_effect = IntegrityError(
+        "insert vehicle", {}, Exception("unique violation")
+    )
+
+    with TestClient(main.app) as client:
+        response = client.post("/admin/drivers", json=_new_driver_payload())
+
+    assert response.status_code == 409
+    added = [call.args[0] for call in mock_db.add.call_args_list]
+    assert any(isinstance(item, Driver) for item in added)
+    assert any(isinstance(item, Vehicle) for item in added)
+    assert any(isinstance(item, AuditLog) for item in added)
+    mock_db.rollback.assert_awaited_once()
+    mock_db.commit.assert_not_awaited()
+    assert "token" not in response.text
+    assert "token_hash" not in response.text
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_create_driver_rejects_extra_vehicle_fields(monkeypatch, mock_db):
+    set_app_env(monkeypatch, "development")
+    use_admin_dependency(make_admin())
+    body = _new_driver_payload()
+    body["vehicle"]["active"] = False
+
+    with TestClient(main.app) as client:
+        response = client.post("/admin/drivers", json=body)
+
+    assert response.status_code == 422
+    mock_db.add.assert_not_called()
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_edit_driver_changes_only_provided_fields(monkeypatch, mock_db):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    use_admin_dependency(admin)
+    vehicle = Vehicle(
+        id=uuid.uuid4(),
+        driver_id=uuid.uuid4(),
+        taxi_number="TX-1",
+        plate_number="OLD 123",
+        type="Sedan",
+    )
+    driver = Driver(
+        id=vehicle.driver_id,
+        center_id=admin.center_id,
+        name="Original",
+        phone="55500001",
+        token_hash="private-token-hash",
+        active=True,
+        online=False,
+    )
+    driver.vehicle = vehicle
+    mock_db.execute.return_value = scalar_result(driver)
+
+    with TestClient(main.app) as client:
+        response = client.patch(
+            f"/admin/drivers/{driver.id}",
+            json={"name": "Updated", "vehicle": {"plate_number": " xy 456 "}},
+        )
+
+    assert response.status_code == 200
+    assert driver.name == "Updated"
+    assert driver.phone == "55500001"
+    assert vehicle.taxi_number == "TX-1"
+    assert vehicle.plate_number == "XY 456"
+    assert vehicle.type == "Sedan"
+    assert isinstance(mock_db.add.call_args.args[0], AuditLog)
+    query = mock_db.execute.await_args.args[0]
+    compiled = query.compile()
+    assert "drivers.center_id" in str(compiled)
+    assert admin.center_id in compiled.params.values()
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix", "body"),
+    [
+        ("patch", "", {"name": "Cross tenant"}),
+        ("post", "/deactivate", None),
+        ("post", "/reactivate", None),
+        ("post", "/token", None),
+    ],
+)
+@pytest.mark.usefixtures("mock_db")
+def test_driver_management_is_scoped_to_admin_center(
+    monkeypatch, mock_db, method, suffix, body
+):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    use_admin_dependency(admin)
+    driver_id = uuid.uuid4()
+    mock_db.execute.return_value = scalar_result(None)
+
+    with TestClient(main.app) as client:
+        response = client.request(
+            method,
+            f"/admin/drivers/{driver_id}{suffix}",
+            json=body,
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Driver not found"
+    query = mock_db.execute.await_args.args[0]
+    compiled = query.compile()
+    assert "drivers.center_id" in str(compiled)
+    assert admin.center_id in compiled.params.values()
+    mock_db.add.assert_not_called()
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_deactivate_invalidates_token_and_sets_offline_state(monkeypatch, mock_db):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    use_admin_dependency(admin)
+    old_token = "old-driver-token"
+    old_hash = hashlib.sha256(old_token.encode()).hexdigest()
+    driver = Driver(
+        id=uuid.uuid4(),
+        center_id=admin.center_id,
+        name="Driver",
+        phone="55500001",
+        token_hash=old_hash,
+        active=True,
+        online=True,
+        vehicle=None,
+    )
+    mock_db.execute.side_effect = [
+        scalar_result(driver),
+        scalar_result(None),
+    ]
+
+    with TestClient(main.app) as client:
+        deactivated = client.post(f"/admin/drivers/{driver.id}/deactivate")
+        old_status = client.post(
+            "/status",
+            headers={"X-Token": old_token},
+            json={"online": True},
+        )
+
+    assert deactivated.status_code == 200
+    assert old_status.status_code == 401
+    assert driver.active is False
+    assert driver.online is False
+    assert driver.deactivated_at is not None
+    assert driver.deactivated_at.tzinfo == timezone.utc
+    assert driver.token_hash != old_hash
+    assert mock_db.commit.await_count == 1
+    assert isinstance(mock_db.add.call_args.args[0], AuditLog)
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_deactivate_is_idempotent(monkeypatch, mock_db):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    use_admin_dependency(admin)
+    deactivated_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    token_hash = hashlib.sha256(b"discarded").hexdigest()
+    driver = Driver(
+        id=uuid.uuid4(),
+        center_id=admin.center_id,
+        name="Driver",
+        phone="55500001",
+        token_hash=token_hash,
+        active=False,
+        online=False,
+        deactivated_at=deactivated_at,
+        vehicle=None,
+    )
+    mock_db.execute.return_value = scalar_result(driver)
+
+    with TestClient(main.app) as client:
+        response = client.post(f"/admin/drivers/{driver.id}/deactivate")
+
+    assert response.status_code == 200
+    assert driver.deactivated_at is deactivated_at
+    assert driver.token_hash == token_hash
+    assert driver.active is False
+    assert driver.online is False
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_deactivation_broadcast_reaches_same_center_only(monkeypatch, mock_db):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    use_admin_dependency(admin)
+    driver = Driver(
+        id=uuid.uuid4(),
+        center_id=admin.center_id,
+        name="Driver",
+        phone="55500001",
+        token_hash="driver-hash",
+        active=True,
+        online=True,
+        vehicle=None,
+    )
+    mock_db.execute.return_value = scalar_result(driver)
+    center_a_client = Mock(send_json=AsyncMock())
+    center_b_client = Mock(send_json=AsyncMock())
+    main.clients[center_a_client] = admin.center_id
+    main.clients[center_b_client] = uuid.uuid4()
+
+    with TestClient(main.app) as client:
+        response = client.post(f"/admin/drivers/{driver.id}/deactivate")
+
+    assert response.status_code == 200
+    center_a_client.send_json.assert_awaited_once_with(
+        {
+            "type": "driver_status",
+            "driver_id": str(driver.id),
+            "online": False,
+            "active": False,
+        }
+    )
+    center_b_client.send_json.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_reactivate_returns_new_token_once_and_old_token_stays_invalid(
+    monkeypatch, mock_db
+):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    use_admin_dependency(admin)
+    old_token = "old-driver-token"
+    driver = Driver(
+        id=uuid.uuid4(),
+        center_id=admin.center_id,
+        name="Driver",
+        phone="55500001",
+        token_hash=hashlib.sha256(old_token.encode()).hexdigest(),
+        active=False,
+        online=False,
+        deactivated_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        vehicle=None,
+    )
+    mock_db.execute.side_effect = [
+        scalar_result(driver),
+        scalar_result(None),
+        scalar_result(driver),
+    ]
+
+    with TestClient(main.app) as client:
+        reactivated = client.post(f"/admin/drivers/{driver.id}/reactivate")
+        old_status = client.post(
+            "/status",
+            headers={"X-Token": old_token},
+            json={"online": True},
+        )
+        new_token = reactivated.json()["token"]
+        new_status = client.post(
+            "/status",
+            headers={"X-Token": new_token},
+            json={"online": True},
+        )
+
+    assert reactivated.status_code == 200
+    assert reactivated.headers["cache-control"] == "no-store"
+    assert driver.active is True
+    assert driver.deactivated_at is None
+    assert driver.token_hash == hashlib.sha256(new_token.encode()).hexdigest()
+    assert old_status.status_code == 401
+    assert new_status.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("suffix", "active"),
+    [("/reactivate", True), ("/token", False)],
+)
+@pytest.mark.usefixtures("mock_db")
+def test_token_actions_reject_invalid_driver_state(
+    monkeypatch, mock_db, suffix, active
+):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    use_admin_dependency(admin)
+    driver = Driver(
+        id=uuid.uuid4(),
+        center_id=admin.center_id,
+        name="Driver",
+        phone="55500001",
+        token_hash="existing-hash",
+        active=active,
+        online=False,
+        vehicle=None,
+    )
+    mock_db.execute.return_value = scalar_result(driver)
+
+    with TestClient(main.app) as client:
+        response = client.post(f"/admin/drivers/{driver.id}{suffix}")
+
+    assert response.status_code == 409
+    assert "token" not in response.text.lower()
+    mock_db.commit.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("mock_db")
+def test_regenerate_token_invalidates_old_and_accepts_new(monkeypatch, mock_db):
+    set_app_env(monkeypatch, "development")
+    admin = make_admin()
+    use_admin_dependency(admin)
+    old_token = "old-driver-token"
+    driver = Driver(
+        id=uuid.uuid4(),
+        center_id=admin.center_id,
+        name="Driver",
+        phone="55500001",
+        token_hash=hashlib.sha256(old_token.encode()).hexdigest(),
+        active=True,
+        online=False,
+        vehicle=None,
+    )
+    mock_db.execute.side_effect = [
+        scalar_result(driver),
+        scalar_result(None),
+        scalar_result(driver),
+    ]
+
+    with TestClient(main.app) as client:
+        regenerated = client.post(f"/admin/drivers/{driver.id}/token")
+        old_status = client.post(
+            "/status",
+            headers={"X-Token": old_token},
+            json={"online": True},
+        )
+        new_token = regenerated.json()["token"]
+        new_status = client.post(
+            "/status",
+            headers={"X-Token": new_token},
+            json={"online": True},
+        )
+
+    assert regenerated.status_code == 200
+    assert regenerated.headers["cache-control"] == "no-store"
+    assert old_status.status_code == 401
+    assert new_status.status_code == 200
+    assert driver.token_hash == hashlib.sha256(new_token.encode()).hexdigest()
 
 
 @pytest.mark.usefixtures("mock_db")

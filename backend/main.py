@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import logging
+import re
 import secrets
 import time
 import uuid
@@ -22,20 +23,23 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from starlette.datastructures import Headers
 
 from app.config import settings
 from app.db import engine, get_db
-from app.models import Admin, AdminSession, Driver, DriverLocation
+from app.models import Admin, AdminSession, AuditLog, Driver, DriverLocation, Vehicle
 from app.platform.router import router as platform_router
 from app.platform.invitations import public_router as invitations_router
 
 MAX_ACCURACY_M = 50
 ADMIN_SESSION_COOKIE = "admin_session"
 ADMIN_SESSION_TTL = timedelta(hours=8)
+PLATE_PATTERN = re.compile(r"^[A-Z0-9](?:[A-Z0-9 -]{0,48}[A-Z0-9])?$")
 password_hasher = PasswordHasher()
 dummy_password_hash = password_hasher.hash(secrets.token_urlsafe(32))
 
@@ -91,7 +95,7 @@ def create_app() -> FastAPI:
         ExplicitOriginCORSMiddleware,
         allow_origins=settings.allowed_web_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PATCH"],
         allow_headers=["Content-Type", "X-Token"],
     )
     application.include_router(platform_router)
@@ -110,9 +114,82 @@ app = create_app()
 clients: dict[WebSocket, uuid.UUID] = {}
 
 
+class VehicleCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    taxi_number: str = Field(min_length=1, max_length=50)
+    plate_number: str = Field(min_length=1, max_length=50)
+    type: str | None = Field(default=None, max_length=50)
+
+    @field_validator("plate_number")
+    @classmethod
+    def normalize_plate(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not PLATE_PATTERN.fullmatch(normalized):
+            raise ValueError("Invalid plate number")
+        return normalized
+
+
+class VehiclePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    taxi_number: str | None = Field(default=None, min_length=1, max_length=50)
+    plate_number: str | None = Field(default=None, min_length=1, max_length=50)
+    type: str | None = Field(default=None, max_length=50)
+
+    @field_validator("taxi_number", "plate_number", mode="before")
+    @classmethod
+    def reject_null_required_fields(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Field cannot be null")
+        return value
+
+    @field_validator("plate_number")
+    @classmethod
+    def normalize_plate(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        if not PLATE_PATTERN.fullmatch(normalized):
+            raise ValueError("Invalid plate number")
+        return normalized
+
+    @model_validator(mode="after")
+    def require_at_least_one_field(self) -> "VehiclePatch":
+        if not self.model_fields_set:
+            raise ValueError("At least one vehicle field is required")
+        return self
+
+
 class NewDriver(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     name: str = Field(..., min_length=1, max_length=100)
     phone: str = Field(..., min_length=5, max_length=20)
+    vehicle: VehicleCreate
+
+
+class DriverPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    phone: str | None = Field(default=None, min_length=5, max_length=20)
+    vehicle: VehiclePatch | None = None
+
+    @field_validator("name", "phone", mode="before")
+    @classmethod
+    def reject_null_driver_fields(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Field cannot be null")
+        return value
+
+    @model_validator(mode="after")
+    def require_at_least_one_field(self) -> "DriverPatch":
+        if not self.model_fields_set or all(
+            getattr(self, field) is None for field in self.model_fields_set
+        ):
+            raise ValueError("At least one driver field is required")
+        return self
 
 
 class Loc(BaseModel):
@@ -217,7 +294,7 @@ async def admin_login(
     if admin is None or not password_matches or not admin.active:
         raise HTTPException(401, "Invalid email or password")
 
-    token = secrets.token_urlsafe(32)
+    token = secrets.token_urlsafe(24)
     now = datetime.now(timezone.utc)
     db.add(
         AdminSession(
@@ -315,22 +392,135 @@ async def broadcast(message: dict, center_id: uuid.UUID) -> None:
     await asyncio.gather(*(send_one(ws) for ws in recipients))
 
 
+async def _commit_driver_change(db: AsyncSession) -> None:
+    try:
+        await db.flush()
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(409, "Driver or vehicle details conflict") from None
+    except SQLAlchemyError:
+        await db.rollback()
+        raise HTTPException(500, "Unable to save driver changes") from None
+
+
+def _driver_audit(admin: Admin, driver: Driver, action: str) -> AuditLog:
+    return AuditLog(
+        center_id=admin.center_id,
+        actor_admin_id=admin.id,
+        action=action,
+        entity_type="driver",
+        entity_id=driver.id,
+    )
+
+
+async def _admin_driver(
+    db: AsyncSession, admin: Admin, driver_id: uuid.UUID
+) -> Driver:
+    result = await db.execute(
+        select(Driver)
+        .options(selectinload(Driver.vehicle))
+        .where(Driver.id == driver_id, Driver.center_id == admin.center_id)
+    )
+    driver = result.scalar_one_or_none()
+    if driver is None:
+        raise HTTPException(404, "Driver not found")
+    return driver
+
+
 @app.post("/admin/drivers")
 async def create_driver(
     body: NewDriver,
     db: AsyncSession = Depends(get_db),
     admin: Admin = Depends(require_admin),
 ):
-    token = secrets.token_urlsafe(24)
+    token = secrets.token_urlsafe(32)
     driver = Driver(
+        id=uuid.uuid4(),
         center_id=admin.center_id,
         name=body.name,
         phone=body.phone,
         token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
     )
     db.add(driver)
-    await db.commit()
-    return {"id": str(driver.id), "name": body.name, "token": token}
+    vehicle = Vehicle(
+        id=uuid.uuid4(),
+        driver_id=driver.id,
+        taxi_number=body.vehicle.taxi_number,
+        plate_number=body.vehicle.plate_number,
+        type=body.vehicle.type,
+    )
+    db.add(vehicle)
+    db.add(
+        AuditLog(
+            center_id=admin.center_id,
+            actor_admin_id=admin.id,
+            action="driver.create",
+            entity_type="driver",
+            entity_id=driver.id,
+            after_state={
+                "name": driver.name,
+                "vehicle": {
+                    "taxi_number": vehicle.taxi_number,
+                    "plate_number": vehicle.plate_number,
+                    "type": vehicle.type,
+                },
+            },
+        )
+    )
+    await _commit_driver_change(db)
+    return {
+        "id": str(driver.id),
+        "name": body.name,
+        "token": token,
+        "vehicle": {
+            "taxi_number": vehicle.taxi_number,
+            "plate_number": vehicle.plate_number,
+            "type": vehicle.type,
+        },
+    }
+
+
+@app.patch("/admin/drivers/{driver_id}")
+async def update_driver(
+    driver_id: uuid.UUID,
+    body: DriverPatch,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(require_admin),
+):
+    driver = await _admin_driver(db, admin, driver_id)
+    if body.name is not None:
+        driver.name = body.name
+    if body.phone is not None:
+        driver.phone = body.phone
+
+    vehicle = driver.vehicle
+    if body.vehicle is not None:
+        if vehicle is None:
+            if body.vehicle.taxi_number is None or body.vehicle.plate_number is None:
+                raise HTTPException(
+                    422,
+                    "Taxi number and plate number are required to add a vehicle",
+                )
+            vehicle = Vehicle(
+                id=uuid.uuid4(),
+                driver_id=driver.id,
+                taxi_number=body.vehicle.taxi_number,
+                plate_number=body.vehicle.plate_number,
+                type=body.vehicle.type,
+            )
+            db.add(vehicle)
+        else:
+            if body.vehicle.taxi_number is not None:
+                vehicle.taxi_number = body.vehicle.taxi_number
+            if body.vehicle.plate_number is not None:
+                vehicle.plate_number = body.vehicle.plate_number
+            if "type" in body.vehicle.model_fields_set:
+                vehicle.type = body.vehicle.type
+
+    db.add(_driver_audit(admin, driver, "driver.edit"))
+    await _commit_driver_change(db)
+    return {"ok": True}
 
 
 @app.get("/admin/drivers/latest")
@@ -369,12 +559,16 @@ async def latest_positions(
                 ranked_locations.c.heading,
                 ranked_locations.c.accuracy,
                 ranked_locations.c.recorded_at,
+                Vehicle.taxi_number,
+                Vehicle.plate_number,
+                Vehicle.type,
             )
             .outerjoin(
                 ranked_locations,
                 (ranked_locations.c.driver_id == Driver.id)
                 & (ranked_locations.c.row_number == 1),
             )
+            .outerjoin(Vehicle, Vehicle.driver_id == Driver.id)
             .where(Driver.center_id == center_id)
             .order_by(Driver.name, Driver.id)
             .limit(limit)
@@ -385,7 +579,9 @@ async def latest_positions(
             "id": str(driver.id),
             "name": driver.name,
             "phone": driver.phone,
-            "online": int(driver.online),
+            "active": driver.active,
+            "deactivated_at": driver.deactivated_at,
+            "online": int(driver.online and driver.active),
             "lat": lat,
             "lng": lng,
             "speed": speed,
@@ -394,9 +590,95 @@ async def latest_positions(
             "recorded_at": recorded_at.timestamp()
             if recorded_at is not None
             else None,
+            "vehicle": (
+                {
+                    "taxi_number": taxi_number,
+                    "plate_number": plate_number,
+                    "type": vehicle_type,
+                }
+                if taxi_number is not None
+                else None
+            ),
         }
-        for driver, lat, lng, speed, heading, accuracy, recorded_at in rows
+        for (
+            driver,
+            lat,
+            lng,
+            speed,
+            heading,
+            accuracy,
+            recorded_at,
+            taxi_number,
+            plate_number,
+            vehicle_type,
+        ) in rows
     ]
+
+
+@app.post("/admin/drivers/{driver_id}/deactivate")
+async def deactivate_driver(
+    driver_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(require_admin),
+):
+    driver = await _admin_driver(db, admin, driver_id)
+    changed = driver.active
+    if changed:
+        discarded_token = secrets.token_urlsafe(32)
+        driver.token_hash = hashlib.sha256(discarded_token.encode("utf-8")).hexdigest()
+        driver.active = False
+        driver.online = False
+        driver.deactivated_at = datetime.now(timezone.utc)
+    db.add(_driver_audit(admin, driver, "driver.deactivate"))
+    await _commit_driver_change(db)
+    await broadcast(
+        {
+            "type": "driver_status",
+            "driver_id": str(driver.id),
+            "online": False,
+            "active": False,
+        },
+        driver.center_id,
+    )
+    return {"ok": True}
+
+
+@app.post("/admin/drivers/{driver_id}/reactivate")
+async def reactivate_driver(
+    driver_id: uuid.UUID,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(require_admin),
+):
+    driver = await _admin_driver(db, admin, driver_id)
+    if driver.active:
+        raise HTTPException(409, "Driver is already active")
+    token = secrets.token_urlsafe(32)
+    driver.token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    driver.active = True
+    driver.deactivated_at = None
+    db.add(_driver_audit(admin, driver, "driver.reactivate"))
+    await _commit_driver_change(db)
+    response.headers["Cache-Control"] = "no-store"
+    return {"id": str(driver.id), "token": token}
+
+
+@app.post("/admin/drivers/{driver_id}/token")
+async def regenerate_driver_token(
+    driver_id: uuid.UUID,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(require_admin),
+):
+    driver = await _admin_driver(db, admin, driver_id)
+    if not driver.active:
+        raise HTTPException(409, "Inactive driver must be reactivated")
+    token = secrets.token_urlsafe(32)
+    driver.token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    db.add(_driver_audit(admin, driver, "driver.token_regenerate"))
+    await _commit_driver_change(db)
+    response.headers["Cache-Control"] = "no-store"
+    return {"id": str(driver.id), "token": token}
 
 
 @app.post("/status")
