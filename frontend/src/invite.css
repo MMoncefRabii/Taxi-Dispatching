@@ -1,0 +1,7 @@
+.invite-card h1 { margin-bottom: 24px; }
+.invite-card form { display: grid; }
+.login-link {
+  display: inline-block;
+  color: #fff;
+  text-decoration: none;
+}

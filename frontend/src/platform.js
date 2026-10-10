@@ -9,6 +9,19 @@
   const centerMessage = document.getElementById('centerMessage');
   const centersTableBody = document.getElementById('centersTableBody');
   const centersEmpty = document.getElementById('centersEmpty');
+  const inviteAdminDialog = document.getElementById('inviteAdminDialog');
+  const inviteAdminForm = document.getElementById('inviteAdminForm');
+  const inviteAdminTitle = document.getElementById('inviteAdminTitle');
+  const inviteAdminMessage = document.getElementById('inviteAdminMessage');
+  const inviteResult = document.getElementById('inviteResult');
+  const inviteLink = document.getElementById('inviteLink');
+  const inviteToken = document.getElementById('inviteToken');
+  const inviteResultMessage = document.getElementById('inviteResultMessage');
+  const centerInvitationsDialog = document.getElementById('centerInvitationsDialog');
+  const centerInvitationsTitle = document.getElementById('centerInvitationsTitle');
+  const centerInvitationsBody = document.getElementById('centerInvitationsBody');
+  const centerInvitationsEmpty = document.getElementById('centerInvitationsEmpty');
+  const centerInvitationsMessage = document.getElementById('centerInvitationsMessage');
   const auditTableBody = document.getElementById('auditTableBody');
   const auditEmpty = document.getElementById('auditEmpty');
   const ownerEmail = document.getElementById('ownerEmail');
@@ -24,6 +37,11 @@
   const devRuns = new Map();
   let devTaskPoller = null;
   let pollingDevRuns = false;
+  let selectedCenterId = null;
+  let selectedCenterName = '';
+  let invitationLink = null;
+  let invitationToken = null;
+  let invitationListCenterId = null;
 
   class ApiError extends Error {
     constructor(status, message) {
@@ -66,6 +84,10 @@
   }
 
   function showLogin(message = '') {
+    if (inviteAdminDialog.open) inviteAdminDialog.close();
+    clearInvitationDialog();
+    if (centerInvitationsDialog.open) centerInvitationsDialog.close();
+    invitationListCenterId = null;
     if (devTaskPoller !== null) {
       clearInterval(devTaskPoller);
       devTaskPoller = null;
@@ -97,6 +119,96 @@
     return cell;
   }
 
+  function makeButton(label, className, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.textContent = label;
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  function openInvitationForm(center) {
+    selectedCenterId = center.id;
+    selectedCenterName = center.name;
+    inviteAdminForm.reset();
+    setMessage(inviteAdminMessage, '');
+    inviteAdminTitle.textContent = `Invite an admin to ${center.name}`;
+    inviteAdminForm.hidden = false;
+    inviteResult.hidden = true;
+    inviteAdminDialog.showModal();
+  }
+
+  function clearInvitationDialog() {
+    invitationLink = null;
+    invitationToken = null;
+    inviteLink.value = '';
+    inviteToken.value = '';
+    setMessage(inviteResultMessage, '');
+    inviteResultMessage.classList.remove('success');
+    inviteAdminForm.reset();
+    setMessage(inviteAdminMessage, '');
+    inviteAdminForm.hidden = false;
+    inviteResult.hidden = true;
+    selectedCenterId = null;
+    selectedCenterName = '';
+  }
+
+  function formatTimestamp(value) {
+    return value
+      ? new Date(value).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, 'Z')
+      : '';
+  }
+
+  async function loadCenterInvitations(centerId, centerName) {
+    invitationListCenterId = centerId;
+    centerInvitationsTitle.textContent = `Invitations · ${centerName}`;
+    centerInvitationsBody.replaceChildren();
+    centerInvitationsEmpty.hidden = true;
+    setMessage(centerInvitationsMessage, '');
+    try {
+      const invitations = await request(
+        `centers/${encodeURIComponent(centerId)}/invitations?limit=50&offset=0`,
+      );
+      centerInvitationsBody.replaceChildren();
+      for (const invitation of invitations) {
+        const row = document.createElement('tr');
+        row.append(
+          makeCell(invitation.email),
+          makeCell(formatTimestamp(invitation.created_at)),
+          makeCell(formatTimestamp(invitation.expires_at)),
+          makeCell(invitation.status, `status ${invitation.status}`),
+        );
+        const actionCell = makeCell('');
+        if (invitation.status === 'pending') {
+          const revokeButton = makeButton('Revoke', 'button secondary', async () => {
+            revokeButton.disabled = true;
+            try {
+              await request(
+                `invitations/${encodeURIComponent(invitation.id)}/revoke`,
+                { method: 'POST' },
+              );
+              await loadCenterInvitations(invitationListCenterId, centerName);
+            } catch (error) {
+              revokeButton.disabled = false;
+              if (!handleUnauthorized(error)) {
+                setMessage(centerInvitationsMessage, error.message || 'Could not revoke the invitation.');
+              }
+            }
+          });
+          actionCell.append(revokeButton);
+        }
+        row.append(actionCell);
+        centerInvitationsBody.append(row);
+      }
+      centerInvitationsEmpty.hidden = invitations.length !== 0;
+    } catch (error) {
+      if (!handleUnauthorized(error)) {
+        setMessage(centerInvitationsMessage, error.message || 'Could not load invitations.');
+      }
+    }
+  }
+
   async function loadCenters() {
     setMessage(consoleMessage, '');
     const centers = await request('centers?limit=50&offset=0');
@@ -111,6 +223,17 @@
         makeCell(center.driver_count),
         makeCell(center.admin_count),
       );
+      const actions = makeCell('');
+      actions.append(
+        makeButton('Invite admin', 'button secondary', () => openInvitationForm(center)),
+        makeButton('Invitations', 'button secondary', async () => {
+          invitationListCenterId = center.id;
+          selectedCenterName = center.name;
+          centerInvitationsDialog.showModal();
+          await loadCenterInvitations(center.id, center.name);
+        }),
+      );
+      row.append(actions);
       centersTableBody.append(row);
     }
     centersEmpty.hidden = centers.length !== 0;
@@ -449,6 +572,75 @@
         setMessage(centerMessage, error.message || 'Could not create the center.');
       }
     }
+  });
+
+  inviteAdminForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setMessage(inviteAdminMessage, '');
+    if (!selectedCenterId) return;
+    const formData = new FormData(inviteAdminForm);
+    const submitButton = inviteAdminForm.querySelector('button[type="submit"]');
+    submitButton.disabled = true;
+    try {
+      const result = await request(
+        `centers/${encodeURIComponent(selectedCenterId)}/invitations`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ email: formData.get('email') }),
+        },
+      );
+      invitationLink = result.link;
+      invitationToken = result.token;
+      inviteLink.value = invitationLink;
+      inviteToken.value = invitationToken;
+      setMessage(inviteResultMessage, '');
+      result.token = '';
+      inviteAdminForm.hidden = true;
+      inviteResult.hidden = false;
+    } catch (error) {
+      if (!handleUnauthorized(error)) {
+        setMessage(inviteAdminMessage, error.message || 'Could not create the invitation.');
+      }
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+
+  document.querySelectorAll('[data-close-invite]').forEach((button) => {
+    button.addEventListener('click', () => inviteAdminDialog.close());
+  });
+  document.getElementById('closeInviteResult').addEventListener('click', () => {
+    inviteAdminDialog.close();
+  });
+  inviteAdminDialog.addEventListener('close', clearInvitationDialog);
+
+  document.getElementById('copyInviteLink').addEventListener('click', async () => {
+    if (!invitationLink) return;
+    try {
+      await navigator.clipboard.writeText(invitationLink);
+      setMessage(inviteResultMessage, 'Invitation link copied.');
+      inviteResultMessage.classList.add('success');
+    } catch {
+      inviteResultMessage.classList.remove('success');
+      setMessage(inviteResultMessage, 'Could not copy the invitation link.');
+    }
+  });
+  document.getElementById('copyInviteToken').addEventListener('click', async () => {
+    if (!invitationToken) return;
+    try {
+      await navigator.clipboard.writeText(invitationToken);
+      setMessage(inviteResultMessage, 'One-time token copied.');
+      inviteResultMessage.classList.add('success');
+    } catch {
+      inviteResultMessage.classList.remove('success');
+      setMessage(inviteResultMessage, 'Could not copy the one-time token.');
+    }
+  });
+
+  document.getElementById('closeCenterInvitations').addEventListener('click', () => {
+    centerInvitationsDialog.close();
+    invitationListCenterId = null;
+    selectedCenterName = '';
   });
 
   document.getElementById('logoutButton').addEventListener('click', async () => {

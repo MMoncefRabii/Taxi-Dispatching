@@ -31,6 +31,7 @@ from app.config import settings
 from app.db import engine, get_db
 from app.models import Admin, AdminSession, Driver, DriverLocation
 from app.platform.router import router as platform_router
+from app.platform.invitations import public_router as invitations_router
 
 MAX_ACCURACY_M = 50
 ADMIN_SESSION_COOKIE = "admin_session"
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "X-Token"],
     )
     application.include_router(platform_router)
+    application.include_router(invitations_router)
     if settings.dev_tasks_enabled:
         from app.platform.devtasks.router import router as devtasks_router
 

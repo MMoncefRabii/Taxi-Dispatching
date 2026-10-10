@@ -5,7 +5,6 @@ import sys
 import uuid
 from pathlib import Path
 
-from argon2 import PasswordHasher
 from sqlalchemy import func, select
 
 if __package__ in {None, ""}:
@@ -13,6 +12,7 @@ if __package__ in {None, ""}:
 
 from app.db import SessionLocal, engine
 from app.models import Admin, Center
+from app.passwords import PasswordValidationError, hash_admin_password
 
 
 class CenterSelectionError(Exception):
@@ -65,11 +65,15 @@ async def seed_admin(
         if center is None:
             raise CenterSelectionError(f"Center {center_id} does not exist.")
 
+        try:
+            password_hash = hash_admin_password(password)
+        except PasswordValidationError as error:
+            raise PasswordInputError(str(error)) from error
         session.add(
             Admin(
                 center_id=center.id,
                 email=normalized_email,
-                password_hash=PasswordHasher().hash(password),
+                password_hash=password_hash,
                 role="center_admin",
                 active=True,
             )
@@ -88,10 +92,6 @@ async def seed_from_prompt(email: str, center_id: uuid.UUID | None) -> None:
         confirmation = getpass.getpass("Confirm admin password: ")
         if password != confirmation:
             raise PasswordInputError("Passwords do not match.")
-        if len(password) < 12 or len(password) > 128:
-            raise PasswordInputError(
-                "Password must be between 12 and 128 characters."
-            )
 
         await seed_admin(email, password, center_id)
     finally:
