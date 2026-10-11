@@ -90,6 +90,57 @@ function isBatchResponse(
   ).size === rejections.length;
 }
 
+async function sendBatchWithPoisonIsolation(
+  sendBatch: BatchSender,
+  points: QueuedLocationPayload[],
+): Promise<LocationBatchResponse> {
+  let response: LocationBatchResponse;
+  try {
+    response = await sendBatch({ points });
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 422) {
+      throw error;
+    }
+    if (points.length === 1) {
+      return {
+        accepted: 0,
+        duplicates: 0,
+        rejected: 1,
+        rejections: [{ index: 0, reason: 'invalid_request' }],
+      };
+    }
+
+    const midpoint = Math.floor(points.length / 2);
+    const first = await sendBatchWithPoisonIsolation(
+      sendBatch,
+      points.slice(0, midpoint),
+    );
+    if (!isBatchResponse(first, midpoint)) {
+      return first;
+    }
+    const second = await sendBatchWithPoisonIsolation(
+      sendBatch,
+      points.slice(midpoint),
+    );
+    if (!isBatchResponse(second, points.length - midpoint)) {
+      return second;
+    }
+    return {
+      accepted: first.accepted + second.accepted,
+      duplicates: first.duplicates + second.duplicates,
+      rejected: first.rejected + second.rejected,
+      rejections: [
+        ...first.rejections,
+        ...second.rejections.map(rejection => ({
+          ...rejection,
+          index: rejection.index + midpoint,
+        })),
+      ],
+    };
+  }
+  return response;
+}
+
 function notifyQueueState(state: QueueState): void {
   activeCallbacks?.onQueueState(state);
 }
@@ -142,9 +193,10 @@ export async function flushLocationQueue(
 
       let response: LocationBatchResponse;
       try {
-        response = await sendBatch({
-          points: batch.map(entry => entry.point),
-        });
+        response = await sendBatchWithPoisonIsolation(
+          sendBatch,
+          batch.map(entry => entry.point),
+        );
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) {
           await queue.clear();

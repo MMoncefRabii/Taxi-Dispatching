@@ -97,17 +97,15 @@ Start PostgreSQL from `backend/`, configure the backend environment, apply the s
 
 ```powershell
 Set-Location .\backend
-$env:POSTGRES_PASSWORD = " abc"
-$env:DATABASE_URL = "postgresql+asyncpg://fleet_tracker:%20abc@localhost:5432/fleet_tracker"
-$env:APP_ENV = "development"
-$env:WEB_ORIGINS = "http://localhost:5173"
+Copy-Item ..\.env.example .\.env
+# Replace the placeholders in .env before starting the database or backend.
 docker compose up -d postgres
 alembic upgrade head
 python -m scripts.seed_default_center
 python -m scripts.seed_admin --email admin@example.com
 ```
 
-See [backend/README.md](backend/README.md) for the local PostgreSQL credentials and explanation of the URL-encoded leading space in the password.
+Set PostgreSQL and backend configuration in `backend/.env` using the placeholders in `.env.example`; URL-encode reserved characters in the database password. See [backend/README.md](backend/README.md) for details.
 
 Start the API service:
 

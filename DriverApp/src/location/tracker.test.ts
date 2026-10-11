@@ -57,6 +57,53 @@ describe('location batch flush', () => {
     expect(state.nextRetryAt).toBeGreaterThan(Date.now());
   });
 
+  it('keeps points and schedules backoff after a network error', async () => {
+    await locationQueue.enqueue(point(1));
+    const sendBatch = jest.fn(async () => {
+      throw new ApiError('Unable to reach the backend.');
+    });
+
+    await flushLocationQueue(locationQueue, sendBatch);
+
+    const state = await locationQueue.getState();
+    expect(state.entries).toHaveLength(1);
+    expect(state.droppedCount).toBe(0);
+    expect(state.retryAttempt).toBe(1);
+    expect(state.nextRetryAt).toBeGreaterThan(Date.now());
+  });
+
+  it('isolates a 422 batch, drops only its bad point, and delivers the rest in order', async () => {
+    await locationQueue.enqueue(point(1));
+    await locationQueue.enqueue(point(2));
+    await locationQueue.enqueue(point(3));
+    const sendBatch = jest.fn(
+      async ({ points }: LocationBatchRequest): Promise<LocationBatchResponse> => {
+        if (points.length > 1 || points[0].recorded_at === 2) {
+          throw new ApiError('Invalid request.', 422);
+        }
+        return {
+          accepted: 1,
+          duplicates: 0,
+          rejected: 0,
+          rejections: [],
+        };
+      },
+    );
+
+    await flushLocationQueue(locationQueue, sendBatch);
+
+    const state = await locationQueue.getState();
+    expect(
+      sendBatch.mock.calls.map(([request]) =>
+        request.points.map(location => location.recorded_at),
+      ),
+    ).toEqual([[1, 2, 3], [1], [2, 3], [2], [3]]);
+    expect(state.entries).toEqual([]);
+    expect(state.droppedCount).toBe(1);
+    expect(state.retryAttempt).toBe(0);
+    expect(state.error).toBe('1 saved location point(s) were rejected.');
+  });
+
   it('clears points when the token is rejected', async () => {
     await locationQueue.enqueue(point(1));
     const sendBatch = jest.fn(async () => {

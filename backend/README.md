@@ -1,16 +1,13 @@
 # Backend Local Development
 
-This setup is for local development only. Do not use the development database password or admin credentials in production.
+This setup is for local development only. Do not use local database credentials in production.
 
-## PostgreSQL credentials
+## PostgreSQL configuration
 
 - Database: `fleet_tracker`
-- User: `fleet_tracker`
-- Password: ` abc` (the password begins with one space)
 - Host port: `5432`
-- Database URL: `postgresql+asyncpg://fleet_tracker:%20abc@localhost:5432/fleet_tracker`
 
-The `%20` in the URL encodes the leading space in the password. Set `POSTGRES_PASSWORD` for PostgreSQL initialization and `DATABASE_URL` for the backend connection.
+Copy `.env.example` to `backend/.env` and replace `<password>` and `<user>` with local values before starting PostgreSQL or the backend. The current Compose configuration fixes the PostgreSQL user, so use that configured user in `DATABASE_URL`; URL-encode reserved characters in the password. Keep `backend/.env` local and out of version control.
 
 ## Admin authentication settings
 
@@ -22,15 +19,11 @@ Platform-owner login uses a separate four-hour HTTP-only `platform_session` cook
 
 From the repository root, activate the project venv, then change into `backend/`. Set `DATABASE_URL` to the PostgreSQL database where the center and admin should be created. The seed scripts support both module invocations from `backend/` and direct script invocations.
 
-The backend also loads settings from `backend/.env` automatically; real environment variables take precedence. Start the backend from the repository root with `.\start-backend.ps1`. To use the checked-in placeholders as a starting point, copy `.env.example` to `backend\.env` and set local values there. Password spaces inside `DATABASE_URL` must be URL-encoded; for example, a leading space is `%20`.
+The backend loads settings from `backend/.env` automatically; environment variables take precedence. Start the backend from the repository root with `.\start-backend.ps1`. To create the local file, copy `.env.example` to `backend\.env` and replace the placeholders there.
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 Set-Location .\backend
-$env:POSTGRES_PASSWORD = " abc"
-$env:DATABASE_URL = "postgresql+asyncpg://fleet_tracker:%20abc@localhost:5432/fleet_tracker"
-$env:APP_ENV = "development"
-$env:WEB_ORIGINS = "http://localhost:5173"
 docker compose up -d postgres
 python -m scripts.seed_default_center
 python -m scripts.seed_admin --email admin@example.com
@@ -63,7 +56,6 @@ Keep the backend command running in that terminal. The API documentation is at [
 
 The platform console can expose the allowlisted local development tasks when `DEV_TASKS_ENABLED=true` and `APP_ENV=development`. This is disabled by default, is refused in production, and starts no backend process. Use it only for local development; see the frontend README for the available console tasks.
 
-<<<<<<< HEAD
 ## Real-PostgreSQL integration tests
 
 The `backend/tests_integration/` tests are not collected unless
@@ -86,7 +78,7 @@ tests the new migration's downgrade and re-upgrade on the fresh schema, and
 drops only `fleet_integration_test` after the run. If that database already
 exists, setup fails rather than deleting it. The integration flag must remain
 off for the regular mocked suite.
-=======
+
 ## PostgreSQL backups and restore checks
 
 The PowerShell scripts in `C:\td\scripts\backup` create PostgreSQL custom-format dumps from the `postgres` service in `backend\docker-compose.yml`. They run `pg_dump` and `pg_restore` inside the PostgreSQL container; no local PostgreSQL installation is needed. The scripts use the database user, database name, and password already set in the container environment. They do not print the password.
@@ -140,14 +132,14 @@ if (-not $container) { throw 'The postgres container is not running.' }
 $dump = 'C:\td-backups\fleet_YYYYMMDD_HHmmss.dump'
 docker cp $dump "${container}:/tmp/fleet_manual_restore.dump"
 if ($LASTEXITCODE -ne 0) { throw 'Could not copy the dump into the container.' }
-docker exec $container createdb -U fleet_tracker --owner=fleet_tracker fleet_manual_restore
+docker exec $container createdb -U '<user>' --owner='<user>' fleet_manual_restore
 if ($LASTEXITCODE -ne 0) { throw 'Could not create the new restore database.' }
-docker exec $container pg_restore -U fleet_tracker --no-owner --no-privileges -d fleet_manual_restore /tmp/fleet_manual_restore.dump
+docker exec $container pg_restore -U '<user>' --no-owner --no-privileges -d fleet_manual_restore /tmp/fleet_manual_restore.dump
 if ($LASTEXITCODE -ne 0) { throw 'Restore into fleet_manual_restore failed.' }
 docker exec $container rm -f /tmp/fleet_manual_restore.dump
 ```
 
-Replace the example dump filename with an existing dump. This manual procedure assumes the container's configured user is `fleet_tracker`. Verify the new database before using it. Remove it only after confirming its contents are no longer needed.
+Replace the example dump filename and `<user>` with an existing dump filename and the PostgreSQL user configured in `backend/.env`. Verify the new database before using it. Remove it only after confirming its contents are no longer needed.
 
 ### Warning: restoring over the live database
 
@@ -177,4 +169,10 @@ The scripts never restore over the live database. Restoring over `fleet_tracker`
 5. Confirm the restored database before restarting the backend.
 
 Backups stored on the same disk do not protect against disk failure. Keep an encrypted copy on a separate machine or other off-machine storage.
->>>>>>> main
+
+## Reserved / unused schema
+
+- `zones`: reserved for defining geographic service areas within a center.
+- `driver_status_logs`: reserved for recording driver online/offline status history.
+- `vehicles.active`: reserved for vehicle-level availability independent of its driver.
+- `vehicles.deactivated_at`: reserved for the UTC time a vehicle is deactivated.

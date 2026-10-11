@@ -402,6 +402,9 @@ def test_admin_login_creates_hashed_eight_hour_session(
     assert created_session.token_hash == hashlib.sha256(token.encode()).hexdigest()
     assert created_session.created_at.tzinfo == timezone.utc
     assert created_session.expires_at - created_session.created_at == timedelta(hours=8)
+    assert admin.last_login == created_session.created_at
+    assert admin.last_login.tzinfo == timezone.utc
+    mock_db.commit.assert_awaited_once()
 
 
 @pytest.mark.usefixtures("mock_db")
@@ -473,6 +476,8 @@ def test_login_rejects_extra_fields_and_oversized_password(monkeypatch, mock_db)
 
     assert extra_field.status_code == 422
     assert oversized_password.status_code == 422
+    assert "correct horse battery staple" not in extra_field.text
+    assert "x" * 129 not in oversized_password.text
     mock_db.execute.assert_not_awaited()
 
 
@@ -1440,10 +1445,17 @@ def test_status_uses_driver_center_for_broadcast(monkeypatch, mock_db):
         response = client.post(
             "/status",
             headers={"X-Token": "driver-token"},
-            json={"online": False, "center_id": str(center_b)},
+            json={"online": False},
+        )
+        spoofed_center_response = client.post(
+            "/status",
+            headers={"X-Token": "driver-token"},
+            json={"online": False, "center_id": str(center_b), "secret": "dont-echo"},
         )
 
     assert response.status_code == 200
+    assert spoofed_center_response.status_code == 422
+    assert "dont-echo" not in spoofed_center_response.text
     center_a_client.send_json.assert_awaited_once()
     center_b_client.send_json.assert_not_awaited()
     assert center_a_client.send_json.await_args.args[0]["type"] == "status"
