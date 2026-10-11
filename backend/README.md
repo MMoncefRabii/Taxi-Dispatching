@@ -55,12 +55,38 @@ python -m scripts.deactivate_admin --email admin@example.com
 
 Deactivation marks the admin inactive, records the UTC deactivation time, and revokes its non-revoked sessions in one transaction. It refuses to deactivate the last active admin of a center. Re-running it for an already inactive admin makes no changes. Both admin seed and deactivation commands leave existing rows in place.
 
+Run the fake driver simulator from `backend/` with `python fake_driver.py`. It reads `FAKE_DRIVER_TOKEN` from the environment or prompts for the token using hidden input. Do not pass the token as a command-line argument.
+
 The default-center seed creates a center only when none exists. `WEB_ORIGINS` is a comma-separated allowlist used by the API for the separate admin frontend; for the default local frontend, set it to `http://localhost:5173`.
 
 Keep the backend command running in that terminal. The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs). The independent web frontend is served separately from the repository's `frontend/` directory; follow the frontend instructions in the root README.
 
 The platform console can expose the allowlisted local development tasks when `DEV_TASKS_ENABLED=true` and `APP_ENV=development`. This is disabled by default, is refused in production, and starts no backend process. Use it only for local development; see the frontend README for the available console tasks.
 
+<<<<<<< HEAD
+## Real-PostgreSQL integration tests
+
+The `backend/tests_integration/` tests are not collected unless
+`INTEGRATION_DB_ENABLED=true`; they are not skipped when the flag is off. From
+the repository root, activate the project venv, make sure the existing
+PostgreSQL container is running, and run:
+
+```powershell
+Set-Location C:\td\backend
+$env:INTEGRATION_DB_ENABLED = "true"
+$env:DEV_TASKS_ENABLED = "false"
+pytest tests_integration
+```
+
+The fixture requires the configured PostgreSQL URL to target `fleet_tracker`,
+uses its connection settings only for the hard-coded `fleet_integration_test`
+database, and refuses to run if the expected single `postgres` container is
+not running. It creates that database with `docker exec`, upgrades it to head,
+tests the new migration's downgrade and re-upgrade on the fresh schema, and
+drops only `fleet_integration_test` after the run. If that database already
+exists, setup fails rather than deleting it. The integration flag must remain
+off for the regular mocked suite.
+=======
 ## PostgreSQL backups and restore checks
 
 The PowerShell scripts in `C:\td\scripts\backup` create PostgreSQL custom-format dumps from the `postgres` service in `backend\docker-compose.yml`. They run `pg_dump` and `pg_restore` inside the PostgreSQL container; no local PostgreSQL installation is needed. The scripts use the database user, database name, and password already set in the container environment. They do not print the password.
@@ -151,3 +177,4 @@ The scripts never restore over the live database. Restoring over `fleet_tracker`
 5. Confirm the restored database before restarting the backend.
 
 Backups stored on the same disk do not protect against disk failure. Keep an encrypted copy on a separate machine or other off-machine storage.
+>>>>>>> main

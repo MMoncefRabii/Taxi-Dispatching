@@ -30,11 +30,18 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, with_loader_criteria
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.admin_management import (
+    AdminDeactivationError,
+    AdminNotFoundError,
+    LastActiveAdminError,
+    SelfDeactivationError,
+    deactivate_admin_in_transaction,
+)
 from app.config import settings
 from app.db import engine, get_db
 from app.locations import (
@@ -110,11 +117,14 @@ def _sample_from_row(row: DriverLocation) -> LocationSample:
 
 async def _latest_driver_location(
     db: AsyncSession,
-    driver_id: uuid.UUID,
+    driver: Driver,
 ) -> DriverLocation | None:
     result = await db.execute(
         select(DriverLocation)
-        .where(DriverLocation.driver_id == driver_id)
+        .where(
+            DriverLocation.driver_id == driver.id,
+            DriverLocation.center_id == driver.center_id,
+        )
         .order_by(DriverLocation.recorded_at.desc(), DriverLocation.id.desc())
         .limit(1)
     )
@@ -123,13 +133,14 @@ async def _latest_driver_location(
 
 async def _previous_driver_location(
     db: AsyncSession,
-    driver_id: uuid.UUID,
+    driver: Driver,
     recorded_at: datetime,
 ) -> DriverLocation | None:
     result = await db.execute(
         select(DriverLocation)
         .where(
-            DriverLocation.driver_id == driver_id,
+            DriverLocation.driver_id == driver.id,
+            DriverLocation.center_id == driver.center_id,
             DriverLocation.recorded_at < recorded_at,
         )
         .order_by(DriverLocation.recorded_at.desc(), DriverLocation.id.desc())
@@ -140,12 +151,13 @@ async def _previous_driver_location(
 
 async def _location_exists(
     db: AsyncSession,
-    driver_id: uuid.UUID,
+    driver: Driver,
     recorded_at: datetime,
 ) -> bool:
     result = await db.execute(
         select(DriverLocation.id).where(
-            DriverLocation.driver_id == driver_id,
+            DriverLocation.driver_id == driver.id,
+            DriverLocation.center_id == driver.center_id,
             DriverLocation.recorded_at == recorded_at,
         )
     )
@@ -180,7 +192,11 @@ async def _insert_location(
 async def _lock_active_driver(db: AsyncSession, driver: Driver) -> Driver:
     result = await db.execute(
         select(Driver)
-        .where(Driver.id == driver.id, Driver.active.is_(True))
+        .where(
+            Driver.id == driver.id,
+            Driver.center_id == driver.center_id,
+            Driver.active.is_(True),
+        )
         .with_for_update()
     )
     locked_driver = result.scalar_one_or_none()
@@ -582,6 +598,63 @@ async def admin_me(
     }
 
 
+@app.get("/admin/admins")
+async def list_admins(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(require_admin),
+):
+    result = await db.execute(
+        select(Admin)
+        .where(Admin.center_id == admin.center_id)
+        .order_by(Admin.created_at, Admin.id)
+        .limit(limit)
+        .offset(offset)
+    )
+    return [
+        {
+            "id": str(row.id),
+            "email": row.email,
+            "active": row.active,
+            "created_at": row.created_at,
+            "last_login": row.last_login,
+            "deactivated_at": row.deactivated_at,
+            "is_self": row.id == admin.id,
+        }
+        for row in result.scalars().all()
+    ]
+
+
+@app.post("/admin/admins/{admin_id}/deactivate")
+async def deactivate_center_admin(
+    admin_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(require_admin),
+):
+    try:
+        changed = await deactivate_admin_in_transaction(
+            db,
+            admin_id,
+            center_id=admin.center_id,
+            actor_admin_id=admin.id,
+        )
+        await db.commit()
+    except AdminNotFoundError:
+        await db.rollback()
+        raise HTTPException(404, "Admin not found") from None
+    except (SelfDeactivationError, LastActiveAdminError):
+        await db.rollback()
+        raise HTTPException(409, "Unable to deactivate admin") from None
+    except AdminDeactivationError:
+        await db.rollback()
+        raise HTTPException(409, "Unable to deactivate admin") from None
+    except SQLAlchemyError:
+        await db.rollback()
+        raise HTTPException(500, "Unable to save admin changes") from None
+    return {"ok": True, "changed": changed}
+
+
 async def get_driver(token: str | None, db: AsyncSession) -> Driver:
     if not token:
         raise HTTPException(401, "Missing driver token")
@@ -620,7 +693,10 @@ async def _commit_driver_change(db: AsyncSession) -> None:
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(409, "Driver or vehicle details conflict") from None
+        raise HTTPException(
+            409,
+            "Vehicle number or plate already in use in your center",
+        ) from None
     except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(500, "Unable to save driver changes") from None
@@ -642,6 +718,7 @@ async def _admin_driver(
     result = await db.execute(
         select(Driver)
         .options(selectinload(Driver.vehicle))
+        .options(with_loader_criteria(Vehicle, Vehicle.center_id == admin.center_id))
         .where(Driver.id == driver_id, Driver.center_id == admin.center_id)
     )
     driver = result.scalar_one_or_none()
@@ -667,6 +744,7 @@ async def create_driver(
     db.add(driver)
     vehicle = Vehicle(
         id=uuid.uuid4(),
+        center_id=admin.center_id,
         driver_id=driver.id,
         taxi_number=body.vehicle.taxi_number,
         plate_number=body.vehicle.plate_number,
@@ -726,6 +804,7 @@ async def update_driver(
                 )
             vehicle = Vehicle(
                 id=uuid.uuid4(),
+                center_id=driver.center_id,
                 driver_id=driver.id,
                 taxi_number=body.vehicle.taxi_number,
                 plate_number=body.vehicle.plate_number,
@@ -790,7 +869,11 @@ async def latest_positions(
                 (ranked_locations.c.driver_id == Driver.id)
                 & (ranked_locations.c.row_number == 1),
             )
-            .outerjoin(Vehicle, Vehicle.driver_id == Driver.id)
+            .outerjoin(
+                Vehicle,
+                (Vehicle.driver_id == Driver.id)
+                & (Vehicle.center_id == center_id),
+            )
             .where(Driver.center_id == center_id)
             .order_by(Driver.name, Driver.id)
             .limit(limit)
@@ -930,16 +1013,16 @@ async def post_location(
     point = _sample_from_location(loc, server_now)
     try:
         driver = await _lock_active_driver(db, driver)
-        previous_latest = await _latest_driver_location(db, driver.id)
+        previous_latest = await _latest_driver_location(db, driver)
         point_datetime = _as_utc_datetime(point.recorded_at)
 
-        if await _location_exists(db, driver.id, point_datetime):
+        if await _location_exists(db, driver, point_datetime):
             await db.commit()
             return {"ok": True}
 
         previous_row = await _previous_driver_location(
             db,
-            driver.id,
+            driver,
             point_datetime,
         )
         reason = validate_location(
@@ -1022,7 +1105,7 @@ async def post_location_batch(
     duplicates = 0
     try:
         driver = await _lock_active_driver(db, driver)
-        previous_latest = await _latest_driver_location(db, driver.id)
+        previous_latest = await _latest_driver_location(db, driver)
         ordered_points = sorted(
             enumerate(body.points),
             key=lambda indexed_point: (
@@ -1033,13 +1116,13 @@ async def post_location_batch(
         for index, loc in ordered_points:
             point = _sample_from_location(loc, server_now)
             point_datetime = _as_utc_datetime(point.recorded_at)
-            if await _location_exists(db, driver.id, point_datetime):
+            if await _location_exists(db, driver, point_datetime):
                 duplicates += 1
                 continue
 
             previous_row = await _previous_driver_location(
                 db,
-                driver.id,
+                driver,
                 point_datetime,
             )
             previous = (

@@ -24,6 +24,9 @@ const state = {
   driverFilter: 'all',
   editingDriverId: null,
   lastRefreshAt: 0,
+  admins: [],
+  adminsOffset: 0,
+  adminsHasMore: false,
 
   authenticated: false
 };
@@ -45,6 +48,13 @@ const elements = {
   loginError: document.getElementById('loginError'),
   loginBtn: document.getElementById('loginBtn'),
   logoutBtn: document.getElementById('logoutBtn'),
+  driversViewBtn: document.getElementById('driversViewBtn'),
+  adminsViewBtn: document.getElementById('adminsViewBtn'),
+  driversView: document.getElementById('driversView'),
+  adminsView: document.getElementById('adminsView'),
+  adminsError: document.getElementById('adminsError'),
+  adminList: document.getElementById('adminList'),
+  loadMoreAdminsBtn: document.getElementById('loadMoreAdminsBtn'),
   driverList: document.getElementById('driverList'),
   fitBtn: document.getElementById('fitBtn'),
   searchInput: document.getElementById('searchInput'),
@@ -491,6 +501,130 @@ async function fetchLatestDrivers() {
   state.lastRefreshAt = Date.now();
 }
 
+function setSidebarView(view) {
+  const showAdmins = view === 'admins';
+  elements.driversView.hidden = showAdmins;
+  elements.adminsView.hidden = !showAdmins;
+  elements.driversViewBtn.classList.toggle('selected', !showAdmins);
+  elements.adminsViewBtn.classList.toggle('selected', showAdmins);
+  elements.driversViewBtn.setAttribute('aria-selected', String(!showAdmins));
+  elements.adminsViewBtn.setAttribute('aria-selected', String(showAdmins));
+  if (showAdmins) fetchAdmins(false);
+}
+
+async function fetchAdmins(append) {
+  if (!state.authenticated) return;
+  if (!append) {
+    state.admins = [];
+    state.adminsOffset = 0;
+    state.adminsHasMore = false;
+  }
+  elements.adminsError.textContent = '';
+  elements.loadMoreAdminsBtn.disabled = true;
+  try {
+    const url = apiUrl('/admin/admins');
+    url.searchParams.set('limit', '200');
+    url.searchParams.set('offset', String(state.adminsOffset));
+    const response = await fetch(url, { credentials: 'include' });
+    if (response.status === 401) {
+      await logout();
+      return;
+    }
+    if (!response.ok) throw new Error(`Unable to load admins: ${response.status}`);
+    const rows = await response.json();
+    if (!Array.isArray(rows)) throw new Error('Invalid admin list response.');
+    state.admins = append ? state.admins.concat(rows) : rows;
+    state.adminsOffset += rows.length;
+    state.adminsHasMore = rows.length === 200;
+    renderAdmins();
+  } catch (error) {
+    console.error(error);
+    elements.adminsError.textContent = 'Unable to load admins. Please try again.';
+  } finally {
+    elements.loadMoreAdminsBtn.disabled = false;
+  }
+}
+
+function renderAdmins() {
+  const rows = state.admins.map((admin) => {
+    const row = document.createElement('article');
+    row.className = 'admin-item';
+    const details = document.createElement('div');
+    details.className = 'admin-details';
+    const email = document.createElement('strong');
+    email.className = 'admin-email';
+    email.textContent = String(admin.email || 'Unknown admin');
+
+    const badges = document.createElement('div');
+    badges.className = 'admin-badges';
+    const status = document.createElement('span');
+    status.className = admin.active ? 'admin-badge active' : 'admin-badge inactive';
+    status.textContent = admin.active ? 'Active' : 'Inactive';
+    badges.appendChild(status);
+    if (admin.is_self) {
+      const self = document.createElement('span');
+      self.className = 'admin-badge self';
+      self.textContent = 'You';
+      badges.appendChild(self);
+    }
+    const metadata = document.createElement('span');
+    metadata.className = 'admin-meta';
+    const createdAt = admin.created_at ? new Date(admin.created_at) : null;
+    metadata.textContent = createdAt && !Number.isNaN(createdAt.getTime())
+      ? `Created ${createdAt.toLocaleDateString()}`
+      : '';
+    details.append(email, badges, metadata);
+    row.appendChild(details);
+
+    if (admin.active && !admin.is_self) {
+      const button = document.createElement('button');
+      button.className = 'btn secondary danger-button';
+      button.type = 'button';
+      button.textContent = 'Deactivate';
+      button.addEventListener('click', () => deactivateAdmin(admin));
+      row.appendChild(button);
+    }
+    return row;
+  });
+  if (rows.length === 0) {
+    const emptyMessage = document.createElement('p');
+    emptyMessage.className = 'admin-empty';
+    emptyMessage.textContent = 'No admins found.';
+    rows.push(emptyMessage);
+  }
+  elements.adminList.replaceChildren(...rows);
+  elements.loadMoreAdminsBtn.hidden = !state.adminsHasMore;
+}
+
+async function deactivateAdmin(admin) {
+  if (!window.confirm(`Deactivate ${String(admin.email || 'this admin')}?`)) return;
+  elements.adminsError.textContent = '';
+  try {
+    const response = await fetch(
+      apiUrl(`/admin/admins/${encodeURIComponent(admin.id)}/deactivate`),
+      { method: 'POST', credentials: 'include' }
+    );
+    if (response.status === 401) {
+      await logout();
+      return;
+    }
+    if (response.status === 409) {
+      elements.adminsError.textContent =
+        'This admin cannot be deactivated. The last active admin in a center must remain active.';
+      return;
+    }
+    if (response.status === 404) {
+      elements.adminsError.textContent = 'Admin not found in your center.';
+      return;
+    }
+    if (!response.ok) throw new Error(`Unable to deactivate admin: ${response.status}`);
+    await fetchAdmins(false);
+  } catch (error) {
+    console.error(error);
+    elements.adminsError.textContent = 'Unable to deactivate this admin. Please try again.';
+  }
+}
+
 function tryConnectWebSocket() {
   if (!state.authenticated) return;
 
@@ -814,6 +948,7 @@ async function login(event) {
     elements.adminPasswordInput.value = '';
     hideLogin();
     await fetchLatestDrivers();
+    if (!elements.adminsView.hidden) await fetchAdmins(false);
     tryConnectWebSocket();
   } catch (err) {
     console.error(err);
@@ -848,6 +983,10 @@ async function logout() {
     state.reconnectTimer = null;
   }
   state.drivers.clear();
+  state.admins = [];
+  state.adminsOffset = 0;
+  state.adminsHasMore = false;
+  elements.adminList.replaceChildren();
   updateDriverListState();
   showLogin();
   if (logoutFailed) {
@@ -881,6 +1020,7 @@ async function initialize() {
     state.authenticated = true;
     hideLogin();
     await fetchLatestDrivers();
+    if (!elements.adminsView.hidden) await fetchAdmins(false);
     tryConnectWebSocket();
   } catch (err) {
     console.error(err);
@@ -893,6 +1033,9 @@ async function initialize() {
 function init() {
   elements.loginForm.addEventListener('submit', login);
   elements.logoutBtn.addEventListener('click', logout);
+  elements.driversViewBtn.addEventListener('click', () => setSidebarView('drivers'));
+  elements.adminsViewBtn.addEventListener('click', () => setSidebarView('admins'));
+  elements.loadMoreAdminsBtn.addEventListener('click', () => fetchAdmins(true));
   elements.newDriverBtn.addEventListener('click', () => showNewDriverDialog());
   elements.cancelNewDriverBtn.addEventListener('click', closeNewDriverDialog);
   elements.newDriverForm.addEventListener('submit', createDriver);

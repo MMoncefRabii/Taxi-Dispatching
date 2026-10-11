@@ -1,4 +1,6 @@
 import argparse
+import getpass
+import os
 import random
 import signal
 import sys
@@ -74,7 +76,7 @@ class DriverSimulator:
 
     def run(self):
         self.set_online(True)
-        print(f"Driver simulator started for token: {self.token}")
+        print("Driver simulator started.")
 
         while self.running:
             self.send_location()
@@ -88,11 +90,21 @@ class DriverSimulator:
 
 def main():
     parser = argparse.ArgumentParser(description="Simulate a Tunis taxi driver sending GPS locations.")
-    parser.add_argument("--token", required=True, help="Driver token from /admin/drivers")
     parser.add_argument("--url", default=DEFAULT_URL, help=f"Backend URL (default: {DEFAULT_URL})")
+    if any(
+        argument == "--token" or argument.startswith("--token=")
+        for argument in sys.argv[1:]
+    ):
+        parser.error(
+            "Do not pass driver tokens on the command line; use "
+            "FAKE_DRIVER_TOKEN or the hidden prompt."
+        )
     args = parser.parse_args()
 
-    simulator = DriverSimulator(args.token, args.url)
+    token = os.environ.get("FAKE_DRIVER_TOKEN") or getpass.getpass("Driver token: ")
+    if not token:
+        parser.error("A driver token is required via FAKE_DRIVER_TOKEN or the hidden prompt.")
+    simulator = DriverSimulator(token, args.url)
 
     def handle_sigint(signum, frame):
         simulator.stop()

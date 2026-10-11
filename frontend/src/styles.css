@@ -30,6 +30,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html, body {
   margin: 0;
@@ -175,6 +176,36 @@ body {
 
 .sidebar-toggle:hover { background: rgba(128, 128, 128, 0.08); }
 
+.view-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+
+.view-tab {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.view-tab.selected {
+  background: rgba(35, 100, 210, 0.12);
+  color: var(--text);
+  border-color: rgba(35, 100, 210, 0.4);
+}
+
+#driversView {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -241,6 +272,78 @@ body {
   overflow: auto;
   flex: 1;
   padding: 8px;
+}
+
+.admins-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.admin-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  padding: 10px;
+}
+
+.admin-details {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.admin-email {
+  overflow-wrap: anywhere;
+}
+
+.admin-badges {
+  display: flex;
+  gap: 5px;
+}
+
+.admin-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.admin-badge.active {
+  color: var(--online);
+  background: rgba(27, 191, 92, 0.12);
+}
+
+.admin-badge.inactive {
+  color: var(--danger);
+  background: rgba(217, 80, 80, 0.13);
+}
+
+.admin-badge.self {
+  color: var(--accent);
+  background: rgba(35, 100, 210, 0.12);
+}
+
+.admin-meta,
+.admin-empty {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.danger-button {
+  color: var(--danger) !important;
+}
+
+#loadMoreAdminsBtn {
+  width: 100%;
 }
 
 .driver-item {
