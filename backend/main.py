@@ -22,7 +22,6 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -330,7 +329,10 @@ async def _request_validation_handler(
             status_code=422,
             content={"detail": {"reason": LocationReason.INVALID_REQUEST.value}},
         )
-    return await request_validation_exception_handler(request, exc)
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Invalid request"},
+    )
 
 
 app = create_app()
@@ -421,25 +423,52 @@ class DriverPatch(BaseModel):
 class Loc(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    lat: float = Field(..., allow_inf_nan=False)
-    lng: float = Field(..., allow_inf_nan=False)
-    speed: float | None = Field(default=None, allow_inf_nan=False)
-    heading: float | None = Field(default=None, allow_inf_nan=False)
-    accuracy: float | None = Field(default=None, allow_inf_nan=False)
-    recorded_at: float | None = Field(default=None, allow_inf_nan=False)
+    lat: float = Field(..., ge=-90, le=90, allow_inf_nan=False)
+    lng: float = Field(..., ge=-180, le=180, allow_inf_nan=False)
+    speed: float | None = Field(
+        default=None,
+        ge=0,
+        le=settings.location_max_speed_kmh / 3.6,
+        allow_inf_nan=False,
+    )
+    heading: float | None = Field(
+        default=None,
+        ge=0,
+        le=360,
+        allow_inf_nan=False,
+    )
+    accuracy: float | None = Field(
+        default=None,
+        ge=0,
+        le=settings.location_max_accuracy_m,
+        allow_inf_nan=False,
+    )
+    recorded_at: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
-class BatchLoc(Loc):
-    recorded_at: float = Field(..., allow_inf_nan=False)
+class BatchLoc(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    lat: float
+    lng: float
+    speed: float | None = None
+    heading: float | None = None
+    accuracy: float | None = None
+    recorded_at: float
 
 
 class LocationBatch(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    points: list[BatchLoc] = Field(min_length=1, max_length=50)
+    points: list[BatchLoc] = Field(
+        min_length=1,
+        max_length=settings.location_batch_max,
+    )
 
 
 class Status(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     online: bool
 
 
@@ -534,6 +563,7 @@ async def admin_login(
 
     token = secrets.token_urlsafe(24)
     now = datetime.now(timezone.utc)
+    admin.last_login = now
     db.add(
         AdminSession(
             admin_id=admin.id,
@@ -1093,12 +1123,6 @@ async def post_location_batch(
     db: AsyncSession = Depends(get_db),
 ):
     driver = await get_driver(x_token, db)
-    if len(body.points) > settings.location_batch_max:
-        raise HTTPException(
-            422,
-            detail={"reason": LocationReason.INVALID_REQUEST.value},
-        )
-
     server_now = time.time()
     accepted_points: list[LocationSample] = []
     rejections: list[dict[str, int | str]] = []

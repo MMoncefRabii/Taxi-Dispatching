@@ -378,6 +378,20 @@ def test_old_live_client_shape_still_succeeds_and_uses_server_time(api):
     assert broadcasts.await_args_list[-1].args[1] == database.driver.center_id
 
 
+def test_location_rejects_out_of_range_coordinates_without_echoing(api):
+    client, database, _ = api
+    response = client.post(
+        "/location",
+        headers={"x-token": TOKEN},
+        json=location_body(lat=91.123456),
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": {"reason": "invalid_request"}}
+    assert "91.123456" not in response.text
+    assert database.locations == []
+
+
 def test_batch_accepts_chronological_plausible_points_and_broadcasts_only_newest(api):
     client, database, broadcasts = api
     response = client.post(
@@ -436,25 +450,56 @@ def test_out_of_order_batch_points_are_stored_but_not_broadcast(api):
     )
 
 
-def test_batch_ignores_duplicate_timestamps(api):
+def test_batch_rejects_out_of_range_point_and_accepts_valid_points(api):
     client, database, _ = api
-    database.locations.append(
-        make_stored_location(database.driver.id, NOW, lat=36.8)
-    )
-
     response = client.post(
         "/location/batch",
         headers={"x-token": TOKEN},
-        json=batch_body(location_body(NOW, lat=91)),
+        json=batch_body(
+            location_body(NOW - 14),
+            location_body(NOW - 7, lat=91.123456),
+            location_body(NOW),
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "accepted": 2,
+        "duplicates": 0,
+        "rejected": 1,
+        "rejections": [{"index": 1, "reason": "invalid_coordinates"}],
+    }
+    assert "91.123456" not in response.text
+    assert [row.recorded_at.timestamp() for row in database.locations] == [
+        NOW - 14,
+        NOW,
+    ]
+
+
+def test_batch_rejects_all_out_of_range_points_with_indexed_reasons(api):
+    client, database, _ = api
+    response = client.post(
+        "/location/batch",
+        headers={"x-token": TOKEN},
+        json=batch_body(
+            location_body(NOW - 7, lng=181.234567),
+            location_body(NOW, heading=361.234567),
+        ),
     )
 
     assert response.status_code == 200
     assert response.json() == {
         "accepted": 0,
-        "duplicates": 1,
-        "rejected": 0,
-        "rejections": [],
+        "duplicates": 0,
+        "rejected": 2,
+        "rejections": [
+            {"index": 0, "reason": "invalid_coordinates"},
+            {"index": 1, "reason": "invalid_heading"},
+        ],
     }
+    assert "181.234567" not in response.text
+    assert "361.234567" not in response.text
+    assert database.locations == []
 
 
 def test_batch_returns_indexed_generic_rejections(api):
@@ -504,6 +549,19 @@ def test_batch_with_51_points_and_extra_fields_is_rejected_without_echo(api):
     assert extra_field.status_code == 422
     assert extra_field.json() == {"detail": {"reason": "invalid_request"}}
     assert "987654321" not in extra_field.text
+
+
+def test_batch_malformed_structure_is_rejected_without_echo(api):
+    client, _, _ = api
+    missing_field = client.post(
+        "/location/batch",
+        headers={"x-token": TOKEN},
+        json={"points": [{"lat": 36.8, "lng": 10.18, "speed": "bad-secret"}]},
+    )
+
+    assert missing_field.status_code == 422
+    assert missing_field.json() == {"detail": {"reason": "invalid_request"}}
+    assert "bad-secret" not in missing_field.text
 
 
 def test_batch_rejects_raw_body_above_64_kib(api):

@@ -33,7 +33,7 @@ TASKS = (
         label="Start database",
         description="Start the local PostgreSQL service without removing volumes.",
         kind="oneshot",
-        command=("docker", "compose", "up", "-d"),
+        command=("docker", "compose", "up", "-d", "postgres"),
         cwd=BACKEND_DIR,
         timeout=120,
     ),

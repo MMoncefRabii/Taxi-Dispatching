@@ -281,7 +281,13 @@ def test_allowlisted_commands_are_argument_sequences():
     dangerous = set(";&|><$`")
     by_id = {task.id: task for task in TASKS}
 
-    assert by_id["db_start"].command == ("docker", "compose", "up", "-d")
+    assert by_id["db_start"].command == (
+        "docker",
+        "compose",
+        "up",
+        "-d",
+        "postgres",
+    )
     assert by_id["db_start"].cwd == BACKEND_DIR
     assert by_id["db_status"].command == ("docker", "ps")
     assert by_id["db_backup"].command[-1].endswith(
