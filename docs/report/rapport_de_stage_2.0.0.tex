@@ -1,0 +1,473 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage[a4paper,margin=2.3cm]{geometry}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{listings}
+\usepackage{graphicx}
+\usepackage{caption}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue,citecolor=blue}
+\setlength{\parskip}{0.45em}
+\setlength{\parindent}{0pt}
+\setlength{\emergencystretch}{3em}
+\setlength{\tabcolsep}{3pt}
+\captionsetup{font=small}
+
+\title{Rapport de stage\\[0.5em]\large Fleet Tracker -- version 2.0.0}
+\author{Nom de l'étudiant : \textit{à compléter}\\[0.4em]
+Organisme d'accueil : \textit{à compléter}\\
+Encadrant : \textit{à compléter}}
+\date{Année universitaire : \textit{à compléter}\\\today}
+
+\begin{document}
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\centering
+\vspace*{2cm}
+{\Large Rapport de stage\par}
+\vspace{1.2cm}
+{\huge\bfseries Fleet Tracker\par}
+\vspace{0.5cm}
+{\Large Version 2.0.0 -- audit du MVP\par}
+\vspace{2cm}
+\begin{tikzpicture}
+\draw[rounded corners,fill=blue!7,draw=blue!45,line width=1pt] (0,0) rectangle (8,2.2);
+\node[align=center,text width=7cm] at (4,1.1)
+  {\Large Suivi de flotte\\[0.4em]\normalsize Application mobile, API et tableau de bord};
+\end{tikzpicture}
+\vfill
+\begin{tabular}{rl}
+Étudiant & \textit{Nom à compléter}\\
+Organisme & \textit{À compléter}\\
+Encadrant & \textit{À compléter}\\
+Période & \textit{À compléter}\\
+\end{tabular}
+\vfill
+{\large \today\par}
+\end{titlepage}
+
+\pagenumbering{roman}
+\hypersetup{pageanchor=true}
+\section*{Remerciements}
+\addcontentsline{toc}{section}{Remerciements}
+\textit{Espace réservé aux remerciements personnels, à compléter par l'étudiant. Aucun nom n'est supposé dans ce document.}
+
+\section*{Résumé}
+Ce rapport présente l'audit d'un MVP de suivi de flotte destiné aux petits opérateurs de taxis et de véhicules. Le système réunit une application mobile chauffeur, une API FastAPI, PostgreSQL et un tableau de bord web. Il comprend la gestion des chauffeurs et administrateurs de centre, la validation des positions, l'ingestion par lots, ainsi qu'une file locale persistante et un service de suivi Android en arrière-plan. Ces fonctions mobiles sont présentes dans le code, mais n'ont pas été vérifiées sur un appareil réel. Les tests backend s'appuient principalement sur des bases simulées. Le déploiement industrialisé, le monitoring et la vérification terrain restent des travaux à mener.
+
+\textbf{Mots-clés :} suivi GPS, flotte, multi-tenant, FastAPI, React Native, PostgreSQL.
+
+\section*{Abstract}
+This report audits a minimum viable fleet-tracking system for small taxi and vehicle operators. It combines a driver mobile app, a FastAPI service, PostgreSQL and a web dashboard. The code includes driver and center-admin management, validated location intake, batch uploads, a persistent local queue, and an Android background location service. These mobile capabilities have not been verified on a real device. Backend tests rely primarily on mocked database sessions. Production deployment, monitoring and field validation remain future work.
+
+\textbf{Keywords:} GPS tracking, fleet, multi-tenant, FastAPI, React Native, PostgreSQL.
+
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+\subsection*{Lecture des statuts}
+\textbf{Réalisé} désigne une fonction présente dans le code suivi; cela ne prouve pas son fonctionnement en production. \textbf{Partiel} désigne une couverture incomplète ou non validée sur l'environnement visé. \textbf{Prévu} désigne un objectif sans implémentation constatée dans le dépôt. Les comportements dépendant d'un téléphone, d'une base réelle ou d'un déploiement sont explicitement signalés comme non vérifiés.
+
+\section{Contexte et problématique}
+
+Les petits exploitants de taxis et de flottes ont besoin de connaître la position récente de leurs chauffeurs, de gérer leurs comptes et de séparer les données de plusieurs clients. Une solution doit rester abordable à exploiter et suffisamment simple pour un pilote local. Ces éléments définissent le besoin de ce projet; ils ne constituent pas une étude statistique du marché.
+
+\subsection{Objectifs}
+\begin{itemize}
+\item collecter les positions communiquées par une application chauffeur;
+\item présenter l'état et les positions récentes dans un tableau de bord;
+\item gérer les chauffeurs et véhicules et séparer les centres côté serveur;
+\item fournir une console plateforme pour administrer les centres et inviter leurs administrateurs;
+\item rester exploitable localement avant tout investissement de déploiement.
+\end{itemize}
+
+\subsection{Périmètre}
+Le dépôt réalise un socle de suivi et de gestion. Il ne réalise pas l'attribution de courses, la facturation, un ERP ni les fonctions d'apprentissage automatique. La collecte par lot, la file locale et le service de premier plan Android sont implémentés dans le code, mais leur comportement sur appareil n'a pas été vérifié; le code iOS n'utilise pas ce service Android. Les conteneurs ne concernent que PostgreSQL en développement; la livraison ne comprend pas de pipeline CI/CD ni de plateforme de production. Aucun script de sauvegarde/restauration n'est présent dans l'arborescence suivie examinée; cette capacité ne peut donc pas être présentée comme réalisée. Les preuves détaillées sont référencées dans l'audit technique (\texttt{AUDIT-2.0.0.md}).
+
+\section{État de l'art et solutions existantes}
+
+Les catégories suivantes servent de repères, non de comparatif chiffré. Les sources officielles consultées sont citées dans la bibliographie. Toute caractéristique particulière non explicitement confirmée est notée « à vérifier ».
+
+\begin{itemize}
+\item \textbf{Télématique commerciale de flotte.} Geotab présente une offre de gestion de flotte et de télématique. Ce segment permet de comparer le MVP à des produits spécialisés; les fonctions, tarifs, intégrations disponibles localement et conditions exactes sont \emph{à vérifier} auprès du fournisseur \cite{geotab}.
+\item \textbf{Serveurs GPS libres.} Traccar se présente comme un système GPS libre et ouvert, auto-hébergeable ou hébergé par son fournisseur. La compatibilité matérielle, les fonctions et les modalités de service correspondent à la documentation officielle à vérifier pour un déploiement donné \cite{traccar}.
+\item \textbf{Plateformes de mobilité et de dispatch.} Les services de mobilité organisent des trajets et mettent en relation différents acteurs. L'étendue des fonctions de gestion de flotte d'une plateforme particulière, son accès et sa disponibilité régionale sont \emph{à vérifier}; aucune capacité non documentée n'est attribuée ici à un produit \cite{uber}.
+\item \textbf{Applications génériques de suivi.} Applications destinées au partage ou à la localisation peuvent répondre à certains besoins ponctuels. Les produits, modèles de coût, capacités multi-client et protections doivent être étudiés au cas par cas : \emph{à vérifier}.
+\end{itemize}
+
+Les sources ne justifient aucune affirmation de prix, part de marché, performance comparative ou couverture géographique. Une maturité supérieure, une assistance dédiée, des intégrations matérielles plus larges ou une capacité d'exploitation supérieure chez un fournisseur donné sont des avantages possibles des solutions établies, mais restent \emph{à vérifier} pour chaque offre et contexte.
+
+\section{Solution proposée}
+
+\subsection{Exigences fonctionnelles}
+\begin{enumerate}
+\item authentifier un chauffeur par jeton opaque et accepter statut, positions isolées et lots bornés avec déduplication;
+\item gérer chauffeurs, véhicules et administrateurs de centre dans le périmètre autorisé;
+\item conserver localement les points en attente, les envoyer par lots et suivre le statut du chauffeur sous Android;
+\item présenter les dernières positions et les changements par WebSocket;
+\item maintenir une identité plateforme distincte pour gérer centres, invitations et journal d'audit;
+\item exposer un lanceur de tâches local facultatif, protégé par un drapeau de développement;
+\item fournir des scripts opérateur pour sauvegarder PostgreSQL et restaurer un dump dans une base temporaire afin de comparer cinq comptages de tables.
+\end{enumerate}
+
+\subsection{Exigences non fonctionnelles et état}
+\textbf{Réalisé dans le code :} validation des coordonnées, dates, fréquence, précision et déplacement plausible; endpoint batch jusqu'à 50 points; contrainte d'unicité chauffeur/horodatage; file persistante bornée à 1 000 points avec reprise et backoff; service de suivi Android; unicité des numéros de taxi et plaques par centre; scripts locaux de sauvegarde et test de restauration par comptage. \textbf{Partiel :} sauvegardes sans copie distante configurée; résultat PASS du test de restauration et application des migrations 0005/0006 rapportés par le propriétaire, non vérifiés ici; service mobile non validé sur matériel réel; le service d'arrière-plan explicite du code est Android tandis que le chemin iOS reste à tester. \textbf{Prévu :} déploiement de production et supervision. Les URLs de développement utilisent HTTP et le jeton mobile est conservé dans AsyncStorage. L'état de code est tiré notamment de \texttt{backend/main.py}, \texttt{backend/app/locations.py}, \texttt{backend/app/models.py}, des migrations \path{0005_location_dedup.py} et \path{0006_vehicle_tenant_uniqueness.py}, de \texttt{DriverApp/src/location/} et de \texttt{scripts/backup/}.
+
+\section{Architecture}
+
+\subsection{Architecture globale réalisée}
+\begin{figure}[ht]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=1.4cm,>=Latex,
+  box/.style={draw,rounded corners,align=center,minimum width=2.7cm,minimum height=1cm,fill=blue!6},
+  store/.style={draw,cylinder,shape border rotate=90,aspect=0.25,align=center,minimum width=2.5cm,minimum height=1cm,fill=green!8},
+  link/.style={-{Latex},thick},
+  planned/.style={-{Latex},thick,dashed}]
+\node[box] (driver) {Application chauffeur\\React Native, file locale\\service Android};
+\node[box,right=of driver] (api) {API\\FastAPI asynchrone};
+\node[store,right=of api] (db) {PostgreSQL};
+\node[box,above=of api] (web) {Tableau admin\\HTML / JS};
+\node[box,below=of api] (platform) {Console plateforme\\HTML / JS};
+\node[box,right=of web] (ws) {WebSocket\\par centre};
+\node[box,below=of db] (backup) {Scripts locaux\\backup + test restore};
+\draw[link] (db) -- (backup);
+\draw[link] (driver) -- node[above]{HTTP, positions/batch} (api);
+\draw[link] (web) -- node[above]{HTTP} (api);
+\draw[link] (ws) -- node[right]{événements} (web);
+\draw[link] (platform) -- node[left]{HTTP} (api);
+\draw[link] (api) -- (db);
+\end{tikzpicture}}
+\caption{Les scripts opérateur de backup et de test restore sont présents; l'exécution PASS est rapportée par le propriétaire et n'a pas été reproduite ici.}
+\end{figure}
+
+\subsection{Parcours d'une position}
+\begin{figure}[ht]
+\centering
+\resizebox{0.96\textwidth}{!}{%
+\begin{tikzpicture}[node distance=1.15cm,>=Latex,
+  box/.style={draw,rounded corners,align=center,text width=3cm,minimum height=0.9cm,fill=blue!5},
+  link/.style={-{Latex},thick}]
+\node[box] (phone) {Téléphone\\GPS + file persistante\\service Android};
+\node[box,right=of phone] (auth) {API\\jeton chauffeur\\/location ou /location/batch};
+\node[box,right=of auth] (valid) {Validation\\coordonnées, dates, vitesse,\\précision et fréquence};
+\node[box,right=of valid] (db) {PostgreSQL\\contrainte unique\\chauffeur + horodatage};
+\node[box,below=of db] (broadcast) {WebSocket\\position la plus récente\\même centre};
+\node[box,left=of broadcast] (dash) {Tableau admin\\marqueur et état};
+\draw[link] (phone) -- node[above]{X-Token, lots jusqu'à 50} (auth);
+\draw[link] (auth) -- (valid);
+\draw[link] (valid) -- node[above]{si acceptée} (db);
+\draw[link] (db) -- (broadcast);
+\draw[link] (broadcast) -- (dash);
+\end{tikzpicture}}
+\caption{Séquence simplifiée; les points invalides sont rejetés ou dédoublonnés et les points retenus sont persistés avant diffusion.}
+\end{figure}
+
+\subsection{Identités et séparation des centres}
+\begin{figure}[ht]
+\centering
+\resizebox{0.92\textwidth}{!}{%
+\begin{tikzpicture}[node distance=1.3cm,>=Latex,
+  box/.style={draw,rounded corners,align=center,text width=3.8cm,minimum height=1cm,fill=blue!6},
+  link/.style={-{Latex},thick}]
+\node[box] (driver) {Identité chauffeur\\jeton dans X-Token};
+\node[box,right=of driver] (driverdb) {Hash du jeton $\rightarrow$ chauffeur\\centre issu de la base};
+\node[box,below=of driver] (admin) {Identité admin centre\\cookie admin\_session};
+\node[box,right=of admin] (admindb) {Session hashée $\rightarrow$ admin\\centre autorisé};
+\node[box,below=of admin] (platform) {Identité plateforme\\cookie platform\_session};
+\node[box,right=of platform] (platformdb) {Session hashée $\rightarrow$ super-admin\\gestion globale des centres};
+\draw[link] (driver) -- (driverdb);
+\draw[link] (admin) -- (admindb);
+\draw[link] (platform) -- (platformdb);
+\end{tikzpicture}}
+\caption{Trois identités distinctes; la plateforme dispose d'un périmètre global d'administration.}
+\end{figure}
+
+\subsection{Architecture cible de déploiement}
+\begin{figure}[ht]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=1.4cm,>=Latex,
+  box/.style={draw,dashed,rounded corners,align=center,minimum width=2.7cm,minimum height=1cm,fill=gray!8},
+  link/.style={-{Latex},thick,dashed}]
+\node[box] (source) {Dépôt Git};
+\node[box,right=of source] (ci) {CI\\tests et build};
+\node[box,right=of ci] (registry) {Registre\\images};
+\node[box,below=of registry] (staging) {Environnement\\staging};
+\node[box,right=of staging] (prod) {Environnement\\production};
+\node[box,below=of ci] (ops) {Secrets, sauvegarde,\\monitoring};
+\draw[link] (source) -- (ci);
+\draw[link] (ci) -- (registry);
+\draw[link] (registry) -- (staging);
+\draw[link] (staging) -- (prod);
+\draw[link] (ops) -- (staging);
+\draw[link] (ops) -- (prod);
+\end{tikzpicture}}
+\caption{Cible, non réalisée dans le dépôt; Docker applicatif, CI, registre, staging et production ne sont pas livrés.}
+\end{figure}
+
+\clearpage
+\section{Justification des choix architecturaux}
+
+Les raisons marquées « interprétation » sont des lectures adaptées au MVP, pas des décisions formelles retrouvées dans le code. Les choix de bibliothèques sont établis par manifestes et notes techniques.
+
+\small
+\begin{longtable}{p{2.6cm}p{3.0cm}p{4.2cm}p{4.1cm}}
+\toprule
+Choix & Alternative & Adéquation au périmètre & Compromis / preuve\\
+\midrule
+\endhead
+FastAPI asynchrone & Framework synchrone & API et accès SQLAlchemy asynchrones; adapté aux requêtes I/O et WebSocket. & Plus de complexité async; tests actuels ne couvrent pas le service sous charge (\path{main.py}, \path{db.py}).\\
+PostgreSQL & SQLite ou base managée & Stockage relationnel pour centres, comptes, véhicules, positions et journaux. & Exploitation et sauvegarde à gérer; Compose ne fournit que PostgreSQL local (\path{docker-compose.yml}).\\
+SQLAlchemy + Alembic & SQL direct et DDL manuel & Modèles relationnels et historique de migration suivi jusqu'à la révision 0006. & Le schéma appliqué n'est pas vérifié; les migrations doivent être exécutées et validées dans l'environnement cible (\path{models.py}, migrations Alembic 0001--0006).\\
+React Native & Deux applications natives distinctes & Base TypeScript commune aux projets Android et iOS. & Permissions et comportement doivent être validés sur les appareils visés; le service d'arrière-plan explicite est Android (\path{package.json}, \path{tracker.ts}).\\
+Interface web statique & SPA lourde & Trois pages HTML/CSS/JS et petits clients API; pas d'étape de compilation frontend web. & Responsabilité de l'état et de la validation repose sur le code navigateur (frontend statique).\\
+Cookies de session côté navigateur & JWT bearer & Sessions opaques côté serveur, révocables, HttpOnly; séparation admin/plateforme par cookies et tables. & Dépend de TLS en déploiement et d'une politique d'origine correcte (routes d'authentification).\\
+Jeton chauffeur opaque hashé & Compte/mot de passe chauffeur & Onboarding par admin sans compte autonome; un token peut être remplacé. & Pas de renouvellement périodique ni de coffre mobile documenté; AsyncStorage.\\
+Colonne \texttt{center\_id} & Base séparée par client ou RLS & Mutualisation de tables avec filtre explicite de centre; choix simple à déployer pour le MVP (interprétation). & Une omission de filtre applicatif aurait un impact transversal; isolation RLS n'est pas construite (revue des requêtes).\\
+WebSocket & Interrogation périodique seule & Événements immédiats de position/statut; liste HTTP fournit l'état courant. & Connexions en mémoire du processus, reconnexion et montée en charge à valider (backend et client web).\\
+Envoi point par point & Lots jusqu'à 50 points et file locale AsyncStorage & La file persistante bornée (1 000 points), les lots, les reprises avec backoff et la déduplication côté serveur réduisent la dépendance à une connexion immédiate (code mobile et API). & Retards et rejets restent possibles; les points les plus anciens sont écartés si la file déborde; la persistance dépend du stockage local.\\
+Suivi natif d'arrière-plan par plateforme & Service Android et chemin iOS geolocation & Le code lance un service Android de premier plan avec notification; sous iOS, il démarre une surveillance géolocalisée sans ce service Android. & Permissions, restrictions OS et continuité ne sont pas vérifiées sur appareil réel; aucune équivalence Android/iOS n'est revendiquée.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\section{Base de données}
+
+Le schéma logique ci-dessous est construit à partir des modèles et des migrations suivies. Il ne confirme pas l'état d'une base appliquée. Les colonnes essentielles sont abrégées pour préserver la lisibilité; l'inventaire complet des colonnes, clés et indexes figure dans l'audit technique versionné.
+
+\begin{figure}[ht]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=1.1cm and 1.45cm,>=Latex,
+  ent/.style={draw,rounded corners,align=left,text width=3.5cm,minimum height=0.9cm,font=\scriptsize,fill=green!7},
+  ref/.style={-{Latex},thick}]
+\node[ent] (center) {\textbf{centers}\\PK id; name, city, timezone};
+\node[ent,right=of center] (admin) {\textbf{admins}\\PK id; FK center\_id; email, password\_hash};
+\node[ent,below=of admin] (as) {\textbf{admin\_sessions}\\PK id; FK admin\_id; token\_hash, expiry};
+\node[ent,below=of center] (driver) {\textbf{drivers}\\PK id; FK center\_id; token\_hash};
+\node[ent,right=of driver] (vehicle) {\textbf{vehicles}\\PK id; FK center\_id, unique driver\_id; taxi\_number, plate\_number\\UNIQUE(center,taxi), UNIQUE(center,plate)};
+\node[ent,below=of driver] (loc) {\textbf{driver\_locations}\\PK id; FK center\_id, driver\_id; lat/lng/date\\UNIQUE(driver, recorded\_at)};
+\node[ent,left=of center] (zone) {\textbf{zones}\\PK id; FK center\_id; code, boundary\\\textit{non utilisée observée}};
+\node[ent,left=of driver] (status) {\textbf{driver\_status\_logs}\\PK id; FK driver\_id; online/date\\\textit{non utilisée observée}};
+\node[ent,right=of as] (audit) {\textbf{audit\_logs}\\PK id; FK center\_id, actor\_admin\_id; JSONB};
+\node[ent,right=of vehicle] (super) {\textbf{super\_admins}\\PK id; email, password\_hash};
+\node[ent,below=of super] (ps) {\textbf{platform\_sessions}\\PK id; FK super\_admin\_id; token\_hash};
+\node[ent,right=of ps] (pa) {\textbf{platform\_audit\_log}\\PK id; FK super\_admin\_id; action};
+\node[ent,below=of ps] (inv) {\textbf{admin\_invitations}\\PK id; FK center\_id, creator; token\_hash};
+\draw[ref] (center) -- (admin);
+\draw[ref] (center) -- (driver);
+\draw[ref] (center) -- (zone);
+\draw[ref] (center) -- (loc);
+\draw[ref] (admin) -- (as);
+\draw[ref] (admin) -- (audit);
+\draw[ref] (driver) -- (vehicle);
+\draw[ref] (driver) -- (loc);
+\draw[ref] (driver) -- (status);
+\draw[ref] (super) -- (ps);
+\draw[ref] (super) -- (pa);
+\draw[ref] (center) |- (inv);
+\draw[ref] (super) -- (inv);
+\end{tikzpicture}}
+\caption{Entités et relations principales; toutes les tables possèdent une clé primaire UUID.}
+\end{figure}
+
+\small
+\begin{longtable}{p{3.2cm}p{4.9cm}p{5.6cm}}
+\toprule
+Entité & Rôle observé & État\\
+\midrule
+\endhead
+Centres & Racine du cloisonnement des admins, chauffeurs, véhicules et positions. & Réalisé dans les modèles et parcours API; état de la base réelle non vérifié.\\
+Admins et sessions admin & Accès au tableau, gestion des admins de centre, sessions révocables. & Réalisé; un admin ne peut pas se désactiver lui-même ni désactiver le dernier admin actif.\\
+Super-admins, sessions plateforme & Gestion globale des centres, invitations et journal de plateforme. & Utilisés par les routes de plateforme; distincts des sessions admin de centre.\\
+Invitations & Création, révocation et acceptation à usage unique, expiration configurée à 48 heures. & Réalisé dans les routes de plateforme.\\
+Chauffeurs et véhicules & Informations chauffeur, jeton, statut et relation véhicule un-à-un. & Réalisé; taxi et plaque uniques par centre depuis la migration 0006.\\
+Positions & Historique, consultation de la plus récente, ingestion unitaire ou par lots. & Réalisé; unicité chauffeur/horodatage ajoutée par 0005.\\
+Journaux admin et plateforme & Traces des actions prises en charge. & Réalisé partiellement selon opérations.\\
+Zones & Zone géographique liée à un centre. & Table présente, utilisation applicative non identifiée.\\
+Journaux de statut chauffeur & Historique prévu de changements online/offline. & Table présente, écriture non identifiée.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\section{Pile technologique}
+
+Les versions backend ci-dessous reproduisent les contraintes déclarées; lorsqu'aucun numéro exact n'est fixé, cela est indiqué. Pour mobile, le manifeste déclare des versions fixes ou des intervalles; le lockfile fournit une résolution reproductible. Aucune version Python effective, de PostgreSQL exécuté ou de navigateur n'a été déduite.
+
+\small
+\begin{longtable}{p{3.4cm}p{5.1cm}p{5.0cm}}
+\toprule
+Technologie & Rôle & Version/contrainte suivie\\
+\midrule
+\endhead
+Python / FastAPI / Uvicorn & API asynchrone & Non épinglés dans \texttt{backend/requirements.txt}.\\
+SQLAlchemy & ORM asynchrone & \texttt{>=2.0,<3}.\\
+asyncpg / Alembic / pydantic-settings & Pilote PostgreSQL, migrations, configuration & Non épinglés dans le manifeste.\\
+python-dotenv & Lecture de configuration & 1.2.4 exact.\\
+argon2-cffi & Hachage de mot de passe & 25.1.0 exact.\\
+email-validator / tzdata & Validation courriel / fuseaux & 2.2.0 et 2026.5 exacts.\\
+PostgreSQL & Persistance locale Compose & Image majeure 16 (`backend/docker-compose.yml`).\\
+React Native / React & Application chauffeur & 0.87.1 et 19.2.3 fixes dans le manifeste.\\
+TypeScript / navigation React Native & Types et navigation & TypeScript intervalle \texttt{\^6.0.3}; navigation \texttt{\^7.5.0}/\texttt{\^7.20.0}.\\
+react-native-geolocation-service & Lecture GPS foreground & \texttt{\^5.3.1}.\\
+AsyncStorage & Stockage app & \texttt{\^3.1.1}.\\
+HTML, CSS, JavaScript, Leaflet & Interface web cartographique et consoles & Leaflet 1.9.4 référencé par CDN; versions HTML/JS non applicables.\\
+pytest / httpx (développement) & Tests backend & pytest 8.4.2 et httpx 0.28.1 exacts dans \texttt{requirements-dev.txt}.\\
+\bottomrule
+\end{longtable}
+\normalsize
+\textit{Sources : manifestes \path{requirements.txt}, \path{requirements-dev.txt} et \path{package.json}, Compose et HTML frontend. Les contraintes mobiles avec caret ne sont pas des épingles exactes.}
+
+\section{Sécurité : mesures en place et lacunes}
+
+\subsection{Mesures observées}
+\begin{itemize}
+\item hachage Argon2 des mots de passe et stockage hashé des sessions, jetons chauffeur et invitations;
+\item cookies HTTP-only, SameSite Strict, échéances et révocations; rôles/sessions admin et plateforme distincts;
+\item dérivation server-side du centre et filtres explicites dans les requêtes des centres;
+\item CORS à origines explicitement autorisées et contrôle d'origine/host pour WebSocket;
+\item modèles d'entrée bornés et champs inconnus refusés pour les formulaires concernés, le statut et les positions individuelles/par lots;
+\item rendu web par `textContent` dans les chemins DOM examinés.
+\end{itemize}
+
+\subsection{Lacunes}
+Pas de limitation de débit, de MFA/TOTP ni de récupération de mot de passe; aucun TLS de déploiement n'est livré et les configurations de développement utilisent HTTP; le jeton chauffeur est conservé dans AsyncStorage; aucune RLS. Le journal plateforme conserve une adresse IP et un User-Agent; les guides contiennent un exemple de secret de développement, ici non reproduit. Au moment de l'audit, \texttt{pip-audit} n'était pas disponible dans le \texttt{PATH}; \texttt{npm audit} lancé dans \texttt{DriverApp} signalait 54 vulnérabilités (5 modérées, 49 élevées). Aucun correctif de dépendance n'a été appliqué; l'exploitabilité dans un build réellement livré reste à vérifier. Résultats et références détaillés : \texttt{docs/audit/AUDIT-2.0.0.md}.
+
+\section{Tests et validation}
+
+La commande backend a été lancée lors de la vérification précédente depuis \texttt{backend} avec \path{DEV_TASKS_ENABLED=false}. Sortie observée : \texttt{160 passed, 1 warning in 18.63s}. L'avertissement signale une dépréciation liée à \texttt{httpx} avec Starlette \texttt{TestClient}. Les tests unitaires couvrent les modules d'authentification admin, tâches de développement, chauffeur simulé, invitations, positions et plateforme; plusieurs fixtures simulent les sessions SQLAlchemy. Le propriétaire rapporte séparément que les trois tests d'intégration PostgreSQL ont réussi; ce résultat n'a pas été reproduit ici. Il rapporte également l'application des migrations 0005/0006 et un PASS au test de restauration des cinq tables. Ces résultats sont donc des déclarations du propriétaire, pas des vérifications effectuées pour cette révision documentaire.
+
+Les tests Jest mobiles comptent 15 cas répartis sur cinq suites : application, client API, saisie de jeton, file et tracker. Le lancement complet a eu deux échecs de délai/mocks dans la suite TokenEntryScreen; relancée seule, cette suite a réussi 2/2. L'échec complet n'est donc pas qualifié de succès ni diagnostiqué comme résolu. Aucune validation GPS, permission, arrière-plan ou téléphone réel n'a été effectuée pour ce rapport; l'essai historique mentionné par le README n'a pas été reproduit.
+
+\section{Comparaison qualitative}
+
+\small
+\begin{longtable}{p{2.4cm}p{2.25cm}p{2.25cm}p{2.25cm}p{2.25cm}p{2.25cm}}
+\toprule
+Critère & Fleet Tracker & Télématique commerciale & Serveur GPS libre & Dispatch mobilité & App générique\\
+\midrule
+\endhead
+Multi-tenant SaaS & Cloison\-nement applicatif par centre présent dans le code; non audité en production. & \emph{À vérifier} selon l'offre. & \emph{À vérifier} selon configuration ou hébergement. & \emph{À vérifier} pour l'offre concernée. & \emph{À vérifier}.\\
+Coût & Pas de modèle de facturation; coûts d'hébergement et d'exploitation à la charge du déploiement. & \emph{À vérifier} auprès du fournisseur. & Logiciel annoncé libre; hébergement géré potentiellement distinct \cite{traccar}. & \emph{À vérifier}; aucun coût supposé. & \emph{À vérifier}.\\
+Contrôle des données & Contrôle dépend du déploiement local; production non livrée. & Gouvernance contractuelle à vérifier. & Auto-hébergement annoncé; configuration et responsabilités à vérifier \cite{traccar}. & \emph{À vérifier}. & \emph{À vérifier}.\\
+Personnali\-sation & Code du MVP modifiable; peu de fonctions métier. & Capacités avancées potentielles, spécifiques à confirmer. & Code ouvert annoncé; extensions compatibles à vérifier. & \emph{À vérifier}. & \emph{À vérifier}.\\
+Effort de mise en place & MVP local; l'opérateur configure base et sécurité; scripts backup et test restore partiel présents. & Paramétrage fournisseur à vérifier. & Installation et maintenance selon le mode choisi. & Processus fournisseur à vérifier. & Produit variable; \emph{à vérifier}.\\
+Maturité, support, matériel, échelle & MVP; moins mature, sans support dédié ni test de charge livré. & Atout possible des offres établies; niveau de chaque fournisseur à vérifier. & Maturité et intégrations exactes à vérifier. & Maturité et intégrations exactes à vérifier. & Très variable; \emph{à vérifier}.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+La solution proposée ne prétend pas dépasser les offres établies en maturité, assistance, intégration à des équipements GPS ou capacité d'exploitation à grande échelle. Les colonnes « à vérifier » ne sont pas des conclusions produit.
+
+\section{Limites et travaux futurs}
+
+\begin{enumerate}
+\item \textbf{Priorité 1 — sécurité d'exploitation :} supprimer les identifiants d'exemple des guides, imposer une terminaison HTTPS appropriée et vérifier les secrets locaux; ajouter protection contre essais répétés et parcours de récupération/MFA après choix de conception.
+\item \textbf{Priorité 2 — fiabilité mobile :} tester sur appareils Android et iOS les permissions, la reprise, le service Android et le comportement lorsque l'application est suspendue; établir les limites réelles de la file.
+\item \textbf{Priorité 3 — exploitation des données :} confirmer par inspection autorisée l'état PostgreSQL déclaré à la révision 0006; décider si zones et journal de statut sont à livrer ou retirer par migration réversible.
+\item \textbf{Priorité 4 — sauvegarde et isolation :} examiner le résultat rapporté PASS, répéter périodiquement la restauration et ajouter une copie indépendante; relancer les tests d'intégration multi-centres dans un environnement de test dédié.
+\item \textbf{Priorité 5 — exploitation cible :} conteneuriser l'application, automatiser tests/build, mettre en place staging/production, journalisation/supervision et alertes backup. Tout cela est prévu, non réalisé.
+\item \textbf{Priorité 6 — produit :} préciser dispatch, flux de paiement et besoins métier avant leur implémentation. Aucun paiement n'est actuellement réalisé.
+\end{enumerate}
+
+\section{Conclusion}
+
+Le dépôt fournit un MVP avec collecte unitaire et par lots, file locale persistante, suivi Android en arrière-plan, gestion des chauffeurs et véhicules, visualisation WebSocket par centre, ainsi que des scripts locaux de sauvegarde et de restauration par comparaison de comptages. Les sessions chauffeur, admin et plateforme sont distinctes; l'existence du code ne remplace pas une validation en environnement réel. Les tests backend ont réussi lors de l'exécution précédente; le propriétaire rapporte trois tests d'intégration réussis, l'application des migrations 0005/0006 et un PASS du test restore cinq tables. Ces trois résultats ne sont pas reproduits dans cette révision. Le comportement sur téléphone reste non vérifié. La prochaine étape doit privilégier la validation terrain, l'inspection PostgreSQL autorisée, la restauration périodique et l'industrialisation.
+
+\section*{Bibliographie}
+\addcontentsline{toc}{section}{Bibliographie}
+\begin{thebibliography}{9}
+\bibitem{geotab}
+Geotab, « Fleet Management Solutions », page officielle consultée le 10 octobre 2026.
+\url{https://www.geotab.com/fleet-management-solutions/}.
+\bibitem{traccar}
+Traccar, « Traccar », page officielle consultée le 10 octobre 2026.
+\url{https://www.traccar.org/}.
+\bibitem{uber}
+Uber, « Drive », page officielle consultée le 10 octobre 2026. Cette page ne permet pas d'établir des caractéristiques de dispatch ou de gestion de flotte; toute comparaison correspondante reste à vérifier.
+\url{https://www.uber.com/us/en/drive/}.
+\bibitem{project}
+Dépôt Taxi-Dispatching, code et documentation suivis, audit du 10 octobre 2026; références précises dans \texttt{docs/audit/AUDIT-2.0.0.md}.
+\end{thebibliography}
+
+\appendix
+\section{Annexe : routes API}
+\small
+\begin{longtable}{p{3.0cm}p{6.1cm}p{4.7cm}}
+\toprule
+Méthode & Chemin & Authentification\\
+\midrule
+\endhead
+POST & \path{/admin/login} & Identifiants admin\\
+POST & \path{/admin/logout} & Cookie admin (révocation si valide)\\
+GET & \path{/admin/me} & Cookie admin\\
+GET & \path{/admin/admins} & Cookie admin; limite et pagination\\
+POST & \path{/admin/admins/{admin_id}/deactivate} & Cookie admin\\
+POST & \path{/admin/drivers} & Cookie admin\\
+PATCH & \path{/admin/drivers/{driver_id}} & Cookie admin\\
+GET & \path{/admin/drivers/latest} & Cookie admin\\
+POST & \path{/admin/drivers/{driver_id}/deactivate} & Cookie admin\\
+POST & \path{/admin/drivers/{driver_id}/reactivate} & Cookie admin\\
+POST & \path{/admin/drivers/{driver_id}/token} & Cookie admin\\
+POST & \path{/status} & \texttt{X-Token} chauffeur\\
+POST & \path{/location} & \texttt{X-Token} chauffeur\\
+POST & \path{/location/batch} & \texttt{X-Token} chauffeur; jusqu'à 50 points\\
+WS & \path{/ws} & Cookie admin et contrôle Origin\\
+POST & \path{/platform/login} & Identifiants plateforme\\
+POST & \path{/platform/logout} & Cookie plateforme\\
+GET & \path{/platform/me}, \path{/platform/centers}, \path{/platform/audit} & Cookie plateforme\\
+POST & \path{/platform/centers} & Cookie plateforme\\
+POST/GET & \path{/platform/centers/{center_id}/invitations} & Cookie plateforme\\
+POST & \path{/platform/invitations/{invitation_id}/revoke} & Cookie plateforme\\
+POST & \path{/invitations/accept} & Public; token dans le corps\\
+GET/POST & \path{/platform/dev/tasks} et \path{/platform/dev/tasks/{task_id}/run} & Optionnel; plateforme + loopback\\
+GET/POST & \path{/platform/dev/runs}, \path{/platform/dev/runs/{run_id}} et \path{/platform/dev/runs/{run_id}/stop} & Optionnel; plateforme + loopback\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\section{Annexe : variables d'environnement}
+\small
+\begin{longtable}{p{4.0cm}p{8.9cm}}
+\toprule
+Nom & Usage\\
+\midrule
+\endhead
+\path{APP_ENV} & Comportement development/production; défaut production si absent/invalide.\\
+\path{DATABASE_URL} & Connexion SQLAlchemy PostgreSQL.\\
+\path{WEB_ORIGINS} & Origines Web autorisées, séparées par virgule.\\
+\path{FRONTEND_BASE_URL} & Base URL pour les liens d'invitation.\\
+\path{DEV_TASKS_ENABLED} & Active les outils locaux uniquement en development; faux par défaut.\\
+\path{LOCATION_MAX_FUTURE_SECONDS} & Tolérance des horodatages futurs.\\
+\path{LOCATION_MAX_AGE_LIVE_SECONDS} & Âge maximal des positions unitaires.\\
+\path{LOCATION_MAX_AGE_BATCH_SECONDS} & Âge maximal des positions reçues par lot.\\
+\path{LOCATION_MIN_INTERVAL_SECONDS} & Intervalle minimal entre positions comparées.\\
+\path{LOCATION_MAX_SPEED_KMH} & Vitesse maximale plausible.\\
+\path{LOCATION_MAX_ACCURACY_M} & Précision maximale acceptée.\\
+\path{LOCATION_BATCH_MAX} & Taille maximale configurée du lot (au plus 50).\\
+\bottomrule
+\end{longtable}
+\normalsize
+Aucune valeur n'est reproduite. La valeur effective de chaque variable sur la machine ou l'environnement du propriétaire est \textbf{non vérifiée}.
+
+\section{Annexe : éléments non vérifiés}
+\begin{itemize}
+\item État réel de la base et données par centre. Le propriétaire rapporte que les migrations 0005/0006 sont appliquées; non vérifié directement.
+\item Existence et protection des fichiers de sauvegarde, planification effective, copie indépendante. Le PASS du test restore sur cinq tables est rapporté par le propriétaire, non reproduit ici.
+\item Usage HTTPS effectif, valeurs de configuration locales et sécurité réseau.
+\item GPS et permissions sur téléphone réel, continuité lorsque l'application est suspendue, et résultat du test téléphone historique indiqué dans le README; comportement mobile **non vérifié**.
+\item Charge, fonctionnement multi-processus WebSocket, supervision et comportement en production.
+\item Exploitabilité réelle des avis NPM dans une livraison; versions disponibles compatibles après la date de l'audit.
+\item Éléments tiers marqués « à vérifier » dans l'état de l'art : fonctions, tarifs, intégrations locales et conditions des offres de télématique; compatibilité matérielle, fonctions et modalités de service Traccar; fonctions de flotte, accès et disponibilité régionale des plateformes de mobilité; choix de produits et capacités des applications génériques.
+\item Cellules « à vérifier » du tableau comparatif pour les fournisseurs : SaaS multi-tenant, coûts, gouvernance/contrôle des données, personnalisation, effort d'installation, maturité, support, matériel et échelle. Aucune cellule fournisseur n'est une conclusion vérifiée.
+\item Effet précis de la tâche locale qui lance \texttt{docker compose up -d} sans nom de service, selon le répertoire et le contexte Compose d'exécution.
+\end{itemize}
+
+\end{document}
