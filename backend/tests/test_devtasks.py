@@ -249,6 +249,34 @@ def test_run_acceptance_records_audit_without_parameters(
     mock_db.commit.assert_awaited_once()
 
 
+@pytest.mark.parametrize("task_id", ["db_backup", "db_restore_test"])
+def test_backup_tasks_run_fixed_commands_without_client_parameters(
+    task_id, enabled_app, mock_db, monkeypatch
+):
+    task = next(task for task in TASKS if task.id == task_id)
+    calls = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        calls.append((args, kwargs))
+        return FakeProcess(lines=[b"completed\n"])
+
+    monkeypatch.setattr(
+        runner.asyncio,
+        "create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    with use_admin(enabled_app, mock_db) as client:
+        response = client.post(f"/platform/dev/tasks/{task_id}/run", json={})
+
+    assert response.status_code == 200
+    assert calls[0][0] == task.command
+    assert calls[0][1]["cwd"] == task.cwd
+    assert task.timeout == 1800
+    assert task.parameters == ()
+    assert mock_db.added[0].action == f"dev_task_run:{task_id}"
+    mock_db.commit.assert_awaited_once()
+
+
 def test_allowlisted_commands_are_argument_sequences():
     dangerous = set(";&|><$`")
     by_id = {task.id: task for task in TASKS}
@@ -256,6 +284,12 @@ def test_allowlisted_commands_are_argument_sequences():
     assert by_id["db_start"].command == ("docker", "compose", "up", "-d")
     assert by_id["db_start"].cwd == BACKEND_DIR
     assert by_id["db_status"].command == ("docker", "ps")
+    assert by_id["db_backup"].command[-1].endswith(
+        "scripts\\backup\\backup-db.ps1"
+    )
+    assert by_id["db_restore_test"].command[-1].endswith(
+        "scripts\\backup\\restore-test.ps1"
+    )
     assert by_id["alembic_current"].command[-2:] == ("alembic", "current")
     assert by_id["alembic_upgrade"].command[-2:] == ("upgrade", "head")
     assert by_id["run_tests"].command[-2:] == ("pytest", "-q")

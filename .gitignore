@@ -3,6 +3,9 @@
 venv/
 __pycache__/
 *.py[cod]
+*.dump
+*.sha256
+backups/
 
 # Local configuration and secrets
 .env
