@@ -1176,7 +1176,14 @@ def test_location_uses_driver_center_and_only_broadcasts_to_that_center(
         active=True,
         online=True,
     )
-    mock_db.execute.return_value = scalar_result(driver)
+    mock_db.execute.side_effect = [
+        scalar_result(driver),
+        scalar_result(driver),
+        scalar_result(None),
+        scalar_result(None),
+        scalar_result(None),
+        scalar_result(uuid.uuid4()),
+    ]
     center_a_client = Mock()
     center_a_client.send_json = AsyncMock()
     center_b_client = Mock()
@@ -1191,14 +1198,25 @@ def test_location_uses_driver_center_and_only_broadcasts_to_that_center(
             json={
                 "lat": 36.8,
                 "lng": 10.2,
+            },
+        )
+        spoofed_center_response = client.post(
+            "/location",
+            headers={"X-Token": "driver-token"},
+            json={
+                "lat": 36.8,
+                "lng": 10.2,
                 "center_id": str(center_b),
             },
         )
 
     assert response.status_code == 200
-    saved_location = mock_db.add.call_args.args[0]
-    assert isinstance(saved_location, DriverLocation)
-    assert saved_location.center_id == center_a
+    assert spoofed_center_response.status_code == 422
+    assert spoofed_center_response.json() == {
+        "detail": {"reason": "invalid_request"}
+    }
+    insert_statement = mock_db.execute.await_args_list[-1].args[0]
+    assert insert_statement.compile().params["center_id"] == center_a
     center_a_client.send_json.assert_awaited_once()
     center_b_client.send_json.assert_not_awaited()
     assert center_a_client.send_json.await_args.args[0]["type"] == "location"

@@ -14,3 +14,12 @@ jest.mock('react-native-geolocation-service', () => ({
     clearWatch: jest.fn(),
   },
 }));
+
+jest.mock('react-native-background-actions', () => ({
+  __esModule: true,
+  default: {
+    isRunning: jest.fn(() => false),
+    start: jest.fn(() => Promise.resolve()),
+    stop: jest.fn(() => Promise.resolve()),
+  },
+}));

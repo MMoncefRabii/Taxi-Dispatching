@@ -1,6 +1,6 @@
 # Fleet Tracker
 
-Fleet Tracker is a real-time GPS tracking system for taxi drivers and fleet operators in Tunisia, starting with a Grand Tunis pilot. Drivers use a React Native app to share their foreground location with a FastAPI service, and an admin dashboard displays driver status and recent positions. This repository is the tracking foundation for a future dispatch and ERP system: dispatching, ERP workflows, and machine-learning features are future phases and are not built yet.
+Fleet Tracker is a real-time GPS tracking system for taxi drivers and fleet operators in Tunisia, starting with a Grand Tunis pilot. Drivers use a React Native app to share location with a FastAPI service, and an admin dashboard displays driver status and recent positions. This repository is the tracking foundation for a future dispatch and ERP system: dispatching, ERP workflows, and machine-learning features are future phases and are not built yet.
 
 ## Architecture
 
@@ -30,8 +30,11 @@ The FastAPI service in `backend/main.py` implements:
 | `POST /admin/drivers/{driver_id}/token` | Replace the token for an active driver and return it once. |
 | `GET /admin/drivers/latest` | Return center-scoped drivers, active state, vehicles, and latest known positions; requires an admin session. |
 | `POST /status` | Set a driver's online flag; requires the driver's `x-token`. |
-| `POST /location` | Validate and store a driver's location; requires `x-token`. Locations with accuracy over 50 m are ignored with `{"ok": false, "ignored": "low accuracy"}`. |
+| `POST /location` | Validate and store one driver's location; requires `x-token`. Validation failures return a generic 422 reason; points sent too frequently return 429. |
+| `POST /location/batch` | Submit 1–50 timestamped points; requires `x-token`. The body is limited to 64 KiB; the response reports accepted, duplicate, and rejected points. |
 | `WS /ws` | Stream driver status and accepted location events to authenticated dashboard clients. |
+
+Location validation uses server time, a 60-second future allowance, a 5-minute live age limit, a 6-hour batch age limit, a 2-second minimum interval, a 200 km/h speed limit, and a 50 m accuracy limit. These limits can be configured with the `LOCATION_*` variables in `.env.example`.
 
 The interactive API documentation is available at `/docs` when the backend is running.
 
@@ -41,18 +44,17 @@ The standalone browser dashboard lives in `frontend/`. It uses HTML, CSS, vanill
 
 ### Driver App
 
-`DriverApp/` contains a React Native 0.87 TypeScript app with token entry, an online/offline switch, settings for the backend URL, and foreground location tracking. The app stores the driver token locally and sends it in `x-token` headers. While online and permitted, it posts location updates through `react-native-geolocation-service` (watch interval 7 seconds, fastest interval 5 seconds) and displays the last accepted coordinates and send time. Location tracking stops when the driver goes offline or leaves the main screen; it does not run in the background.
+`DriverApp/` contains a React Native 0.87 TypeScript app with token entry, an online/offline switch, settings for the backend URL, and Android foreground-service location tracking. The app stores the driver token and a bounded offline location queue in AsyncStorage. While online and permitted, `react-native-geolocation-service` collects fixes on a 7-second interval and the app batches queued points to the backend. The Android foreground service is intended to keep tracking active while the app is backgrounded or the screen is locked; this behavior still requires real-device verification. The app shows queued and dropped/rejected counts, the last successful sync time, and textual sync errors. iOS background tracking is out of scope and untested.
 
 **End-to-end status:** Real phone/emulator location has been confirmed appearing live on the admin dashboard.
 
 ## What's Not Built Yet
 
-- No background location tracking; the driver app must remain foregrounded.
 - No role-based permissions; admins are scoped to their center.
 - No dispatching, order assignment, or ERP workflows.
 - PostgreSQL is used for persistence; the included Compose service is for local development only.
 - The project is not containerized and has no CI/CD pipeline or cloud deployment.
-- Backend tests currently cover admin authentication and latest-position list limits; broader API and location-flow coverage is not present. The mobile app currently has only a basic Jest render smoke test.
+- Android background tracking and offline delivery require real-device verification; iOS background tracking is not implemented or tested.
 
 ## Tech Stack
 

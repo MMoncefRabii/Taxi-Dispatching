@@ -27,6 +27,48 @@ class Settings(BaseSettings):
         default=False,
         validation_alias="DEV_TASKS_ENABLED",
     )
+    location_max_future_seconds: float = Field(
+        default=60,
+        gt=0,
+        allow_inf_nan=False,
+        validation_alias="LOCATION_MAX_FUTURE_SECONDS",
+    )
+    location_max_age_live_seconds: float = Field(
+        default=300,
+        gt=0,
+        allow_inf_nan=False,
+        validation_alias="LOCATION_MAX_AGE_LIVE_SECONDS",
+    )
+    location_max_age_batch_seconds: float = Field(
+        default=21600,
+        gt=0,
+        allow_inf_nan=False,
+        validation_alias="LOCATION_MAX_AGE_BATCH_SECONDS",
+    )
+    location_min_interval_seconds: float = Field(
+        default=2,
+        gt=0,
+        allow_inf_nan=False,
+        validation_alias="LOCATION_MIN_INTERVAL_SECONDS",
+    )
+    location_max_speed_kmh: float = Field(
+        default=200,
+        gt=0,
+        allow_inf_nan=False,
+        validation_alias="LOCATION_MAX_SPEED_KMH",
+    )
+    location_max_accuracy_m: float = Field(
+        default=50,
+        gt=0,
+        allow_inf_nan=False,
+        validation_alias="LOCATION_MAX_ACCURACY_M",
+    )
+    location_batch_max: int = Field(
+        default=50,
+        ge=1,
+        le=50,
+        validation_alias="LOCATION_BATCH_MAX",
+    )
     app_env: Literal["development", "production"] = Field(
         default="production",
         validation_alias="APP_ENV",

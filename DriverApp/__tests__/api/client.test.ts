@@ -14,7 +14,7 @@ describe('postJson', () => {
     mockedStorage.getItem.mockImplementation(async key =>
       key === 'driver_token' ? 'driver-token' : 'http://localhost:8000',
     );
-    global.fetch = fetchMock;
+    globalThis.fetch = fetchMock;
     setUnauthorizedHandler(null);
   });
 

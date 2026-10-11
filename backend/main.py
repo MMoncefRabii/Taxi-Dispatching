@@ -22,21 +22,32 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import settings
 from app.db import engine, get_db
+from app.locations import (
+    LocationLimits,
+    LocationReason,
+    LocationSample,
+    validate_location,
+)
 from app.models import Admin, AdminSession, AuditLog, Driver, DriverLocation, Vehicle
 from app.platform.router import router as platform_router
 from app.platform.invitations import public_router as invitations_router
 
-MAX_ACCURACY_M = 50
+LOCATION_BATCH_BODY_MAX_BYTES = 64 * 1024
 ADMIN_SESSION_COOKIE = "admin_session"
 ADMIN_SESSION_TTL = timedelta(hours=8)
 PLATE_PATTERN = re.compile(r"^[A-Z0-9](?:[A-Z0-9 -]{0,48}[A-Z0-9])?$")
@@ -56,14 +67,193 @@ class ExplicitOriginCORSMiddleware(CORSMiddleware):
 
 
 def _normalize_recorded_at(value: float | None) -> float:
-    now = time.time()
-    if value is None or value > now + 60 or value < now - 86400:
-        return now
-    return value
+    return time.time() if value is None else value
 
 
 def _as_utc_datetime(timestamp: float) -> datetime:
     return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+
+
+def _location_limits(max_age_seconds: float) -> LocationLimits:
+    return LocationLimits(
+        max_future_seconds=settings.location_max_future_seconds,
+        max_age_seconds=max_age_seconds,
+        min_interval_seconds=settings.location_min_interval_seconds,
+        max_speed_kmh=settings.location_max_speed_kmh,
+        max_accuracy_m=settings.location_max_accuracy_m,
+    )
+
+
+def _sample_from_location(loc: "Loc", server_now: float) -> LocationSample:
+    return LocationSample(
+        lat=loc.lat,
+        lng=loc.lng,
+        speed=loc.speed,
+        heading=loc.heading,
+        accuracy=loc.accuracy,
+        recorded_at=_normalize_recorded_at(
+            server_now if loc.recorded_at is None else loc.recorded_at
+        ),
+    )
+
+
+def _sample_from_row(row: DriverLocation) -> LocationSample:
+    return LocationSample(
+        lat=row.lat,
+        lng=row.lng,
+        speed=row.speed,
+        heading=row.heading,
+        accuracy=row.accuracy,
+        recorded_at=row.recorded_at.timestamp(),
+    )
+
+
+async def _latest_driver_location(
+    db: AsyncSession,
+    driver_id: uuid.UUID,
+) -> DriverLocation | None:
+    result = await db.execute(
+        select(DriverLocation)
+        .where(DriverLocation.driver_id == driver_id)
+        .order_by(DriverLocation.recorded_at.desc(), DriverLocation.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _previous_driver_location(
+    db: AsyncSession,
+    driver_id: uuid.UUID,
+    recorded_at: datetime,
+) -> DriverLocation | None:
+    result = await db.execute(
+        select(DriverLocation)
+        .where(
+            DriverLocation.driver_id == driver_id,
+            DriverLocation.recorded_at < recorded_at,
+        )
+        .order_by(DriverLocation.recorded_at.desc(), DriverLocation.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _location_exists(
+    db: AsyncSession,
+    driver_id: uuid.UUID,
+    recorded_at: datetime,
+) -> bool:
+    result = await db.execute(
+        select(DriverLocation.id).where(
+            DriverLocation.driver_id == driver_id,
+            DriverLocation.recorded_at == recorded_at,
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _insert_location(
+    db: AsyncSession,
+    driver: Driver,
+    point: LocationSample,
+) -> bool:
+    result = await db.execute(
+        pg_insert(DriverLocation)
+        .values(
+            center_id=driver.center_id,
+            driver_id=driver.id,
+            lat=point.lat,
+            lng=point.lng,
+            speed=point.speed,
+            heading=point.heading,
+            accuracy=point.accuracy,
+            recorded_at=_as_utc_datetime(point.recorded_at),
+        )
+        .on_conflict_do_nothing(
+            constraint="uq_driver_locations_driver_recorded_at"
+        )
+        .returning(DriverLocation.id)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _lock_active_driver(db: AsyncSession, driver: Driver) -> Driver:
+    result = await db.execute(
+        select(Driver)
+        .where(Driver.id == driver.id, Driver.active.is_(True))
+        .with_for_update()
+    )
+    locked_driver = result.scalar_one_or_none()
+    if locked_driver is None:
+        raise HTTPException(401, "Invalid driver token")
+    return locked_driver
+
+
+class LocationBatchBodyLimitMiddleware:
+    def __init__(self, app: ASGIApp, max_body_bytes: int) -> None:
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if not (
+            scope["type"] == "http"
+            and scope["method"] == "POST"
+            and scope["path"] == "/location/batch"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        content_length = next(
+            (
+                value.decode("ascii", errors="ignore")
+                for key, value in scope["headers"]
+                if key.lower() == b"content-length"
+            ),
+            None,
+        )
+        if content_length is not None:
+            try:
+                if int(content_length) > self.max_body_bytes:
+                    await self._send_too_large(send)
+                    return
+            except ValueError:
+                pass
+
+        buffered_messages = []
+        body_size = 0
+        while True:
+            message = await receive()
+            buffered_messages.append(message)
+            body_size += len(message.get("body", b""))
+            if body_size > self.max_body_bytes:
+                await self._send_too_large(send)
+                return
+            if message["type"] != "http.request" or not message.get(
+                "more_body", False
+            ):
+                break
+
+        async def replay_receive():
+            if buffered_messages:
+                return buffered_messages.pop(0)
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
+
+    @staticmethod
+    async def _send_too_large(send: Send) -> None:
+        content = b'{"detail":{"reason":"request_too_large"}}'
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(content)).encode("ascii")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": content})
 
 
 @asynccontextmanager
@@ -92,11 +282,19 @@ async def lifespan(application: FastAPI):
 def create_app() -> FastAPI:
     application = FastAPI(title="Fleet Tracker", lifespan=lifespan)
     application.add_middleware(
+        LocationBatchBodyLimitMiddleware,
+        max_body_bytes=LOCATION_BATCH_BODY_MAX_BYTES,
+    )
+    application.add_middleware(
         ExplicitOriginCORSMiddleware,
         allow_origins=settings.allowed_web_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH"],
         allow_headers=["Content-Type", "X-Token"],
+    )
+    application.add_exception_handler(
+        RequestValidationError,
+        _request_validation_handler,
     )
     application.include_router(platform_router)
     application.include_router(invitations_router)
@@ -105,6 +303,18 @@ def create_app() -> FastAPI:
 
         application.include_router(devtasks_router)
     return application
+
+
+async def _request_validation_handler(
+    request: Request,
+    exc: RequestValidationError,
+) -> Response:
+    if request.url.path in {"/location", "/location/batch"}:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": {"reason": LocationReason.INVALID_REQUEST.value}},
+        )
+    return await request_validation_exception_handler(request, exc)
 
 
 app = create_app()
@@ -193,12 +403,24 @@ class DriverPatch(BaseModel):
 
 
 class Loc(BaseModel):
-    lat: float = Field(..., ge=-90, le=90)
-    lng: float = Field(..., ge=-180, le=180)
-    speed: float | None = Field(default=None, ge=0)
-    heading: float | None = Field(default=None, ge=0, le=360)
-    accuracy: float | None = Field(default=None, ge=0)
-    recorded_at: float | None = None
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    lat: float = Field(..., allow_inf_nan=False)
+    lng: float = Field(..., allow_inf_nan=False)
+    speed: float | None = Field(default=None, allow_inf_nan=False)
+    heading: float | None = Field(default=None, allow_inf_nan=False)
+    accuracy: float | None = Field(default=None, allow_inf_nan=False)
+    recorded_at: float | None = Field(default=None, allow_inf_nan=False)
+
+
+class BatchLoc(Loc):
+    recorded_at: float = Field(..., allow_inf_nan=False)
+
+
+class LocationBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    points: list[BatchLoc] = Field(min_length=1, max_length=50)
 
 
 class Status(BaseModel):
@@ -704,48 +926,187 @@ async def post_location(
     db: AsyncSession = Depends(get_db),
 ):
     driver = await get_driver(x_token, db)
-    if loc.accuracy is not None and loc.accuracy > MAX_ACCURACY_M:
-        return {"ok": False, "ignored": "low accuracy"}
+    server_now = time.time()
+    point = _sample_from_location(loc, server_now)
+    try:
+        driver = await _lock_active_driver(db, driver)
+        previous_latest = await _latest_driver_location(db, driver.id)
+        point_datetime = _as_utc_datetime(point.recorded_at)
 
-    timestamp = _normalize_recorded_at(loc.recorded_at)
-    db.add(
-        DriverLocation(
-            center_id=driver.center_id,
-            driver_id=driver.id,
-            lat=loc.lat,
-            lng=loc.lng,
-            speed=loc.speed,
-            heading=loc.heading,
-            accuracy=loc.accuracy,
-            recorded_at=_as_utc_datetime(timestamp),
+        if await _location_exists(db, driver.id, point_datetime):
+            await db.commit()
+            return {"ok": True}
+
+        previous_row = await _previous_driver_location(
+            db,
+            driver.id,
+            point_datetime,
         )
-    )
-    broadcast_status = None
-    if not driver.online:
-        driver.online = True
-        broadcast_status = {
-            "type": "status",
-            "driver_id": str(driver.id),
-            "online": True,
-        }
-    await db.commit()
+        reason = validate_location(
+            point,
+            now=server_now,
+            previous=(
+                _sample_from_row(previous_row)
+                if previous_row is not None
+                else None
+            ),
+            limits=_location_limits(settings.location_max_age_live_seconds),
+        )
+        if reason is not None:
+            await db.rollback()
+            if reason is LocationReason.TOO_FREQUENT:
+                raise HTTPException(
+                    429,
+                    "Location update received too frequently.",
+                )
+            raise HTTPException(422, detail={"reason": reason.value})
+
+        inserted = await _insert_location(db, driver, point)
+        if not inserted:
+            await db.commit()
+            return {"ok": True}
+
+        broadcast_status = None
+        if not driver.online:
+            driver.online = True
+            broadcast_status = {
+                "type": "status",
+                "driver_id": str(driver.id),
+                "online": True,
+            }
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        raise HTTPException(500, "Unable to save location") from None
 
     if broadcast_status is not None:
         await broadcast(broadcast_status, driver.center_id)
-    await broadcast(
-        {
-            "type": "location",
-            "driver_id": str(driver.id),
-            "name": driver.name,
-            "lat": loc.lat,
-            "lng": loc.lng,
-            "speed": loc.speed,
-            "heading": loc.heading,
-            "recorded_at": timestamp,
-        },
-        driver.center_id,
+    previous_timestamp = (
+        previous_latest.recorded_at.timestamp()
+        if previous_latest is not None
+        else None
     )
+    if previous_timestamp is None or point.recorded_at > previous_timestamp:
+        await broadcast(
+            {
+                "type": "location",
+                "driver_id": str(driver.id),
+                "name": driver.name,
+                "lat": point.lat,
+                "lng": point.lng,
+                "speed": point.speed,
+                "heading": point.heading,
+                "recorded_at": point.recorded_at,
+            },
+            driver.center_id,
+        )
     return {"ok": True}
+
+
+@app.post("/location/batch")
+async def post_location_batch(
+    body: LocationBatch,
+    x_token: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    driver = await get_driver(x_token, db)
+    if len(body.points) > settings.location_batch_max:
+        raise HTTPException(
+            422,
+            detail={"reason": LocationReason.INVALID_REQUEST.value},
+        )
+
+    server_now = time.time()
+    accepted_points: list[LocationSample] = []
+    rejections: list[dict[str, int | str]] = []
+    duplicates = 0
+    try:
+        driver = await _lock_active_driver(db, driver)
+        previous_latest = await _latest_driver_location(db, driver.id)
+        ordered_points = sorted(
+            enumerate(body.points),
+            key=lambda indexed_point: (
+                indexed_point[1].recorded_at,
+                indexed_point[0],
+            ),
+        )
+        for index, loc in ordered_points:
+            point = _sample_from_location(loc, server_now)
+            point_datetime = _as_utc_datetime(point.recorded_at)
+            if await _location_exists(db, driver.id, point_datetime):
+                duplicates += 1
+                continue
+
+            previous_row = await _previous_driver_location(
+                db,
+                driver.id,
+                point_datetime,
+            )
+            previous = (
+                _sample_from_row(previous_row)
+                if previous_row is not None
+                else None
+            )
+
+            reason = validate_location(
+                point,
+                now=server_now,
+                previous=previous,
+                limits=_location_limits(settings.location_max_age_batch_seconds),
+            )
+            if reason is not None:
+                rejections.append({"index": index, "reason": reason.value})
+                continue
+
+            inserted = await _insert_location(db, driver, point)
+            if not inserted:
+                duplicates += 1
+                continue
+            accepted_points.append(point)
+
+        broadcast_status = None
+        if accepted_points and not driver.online:
+            driver.online = True
+            broadcast_status = {
+                "type": "status",
+                "driver_id": str(driver.id),
+                "online": True,
+            }
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        raise HTTPException(500, "Unable to save locations") from None
+
+    if broadcast_status is not None:
+        await broadcast(broadcast_status, driver.center_id)
+    if accepted_points:
+        newest_point = max(accepted_points, key=lambda point: point.recorded_at)
+        previous_timestamp = (
+            previous_latest.recorded_at.timestamp()
+            if previous_latest is not None
+            else None
+        )
+        if previous_timestamp is None or newest_point.recorded_at > previous_timestamp:
+            await broadcast(
+                {
+                    "type": "location",
+                    "driver_id": str(driver.id),
+                    "name": driver.name,
+                    "lat": newest_point.lat,
+                    "lng": newest_point.lng,
+                    "speed": newest_point.speed,
+                    "heading": newest_point.heading,
+                    "recorded_at": newest_point.recorded_at,
+                },
+                driver.center_id,
+            )
+
+    return {
+        "accepted": len(accepted_points),
+        "duplicates": duplicates,
+        "rejected": len(rejections),
+        "rejections": rejections,
+    }
 
 
 @app.websocket("/ws")
