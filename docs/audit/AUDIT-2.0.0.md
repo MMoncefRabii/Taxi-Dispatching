@@ -1,6 +1,6 @@
 # Audit du système Fleet Tracker — 2.0.0
 
-Date de mise à jour : 11 octobre 2026. Branche observée : `feat/vehicle-tenant-uniqueness`. Vérification documentaire du tree courant ; aucune connexion base, lecture `.env`, ni essai téléphone n'a été effectué pour cette mise à jour. Les résultats d'exécution explicitement fournis par le propriétaire sont étiquetés « rapporté par le propriétaire » et ne sont pas présentés comme vérifiés par l'auditeur. Les valeurs sensibles sont omises.
+Date de mise à jour : 13 octobre 2026. Branche observée : `docs/report-react-frontend`. Vérification documentaire du tree courant ; aucune connexion base, lecture `.env`, ni essai téléphone n'a été effectué pour cette mise à jour. Les résultats d'exécution explicitement fournis par le propriétaire sont étiquetés « rapporté par le propriétaire » et ne sont pas présentés comme vérifiés par l'auditeur. Les valeurs sensibles sont omises.
 
 ## Méthode et niveaux de preuve
 
@@ -16,14 +16,15 @@ L'arborescence actuelle contient les migrations `0001_initial_schema.py` à `000
 | Composant/capacité | État | Preuve |
 |---|---|---|
 | API FastAPI asynchrone, accès PostgreSQL/SQLAlchemy | IMPLEMENTED | `backend/main.py:1-114`; `backend/app/db.py:1-13`; `backend/requirements.txt:1-11` (**VERIFIED**) |
-| Tableau de bord admin statique HTML/CSS/JavaScript/Leaflet | IMPLEMENTED | `frontend/index.html:1-117`; `frontend/src/app.js:1-944`; `frontend/README.md:1-18` (**VERIFIED**) |
-| Console opérateur de plateforme | IMPLEMENTED | `frontend/platform.html:1-199`; `frontend/src/platform.js:1-693`; routes `backend/app/platform/router.py:154-490` (**VERIFIED**) |
-| Page publique d'acceptation d'invitation | IMPLEMENTED | `frontend/invite.html:1-35`; `frontend/src/invite.js:1-66`; `backend/app/platform/invitations.py:145-191` (**VERIFIED**) |
+| Frontend Web | IMPLEMENTED | React 19.3.0, TypeScript 6.0.3, Vite 8.3.4, Vitest 5.0.4, ESLint 10.12.0 et Leaflet 1.9.4 via npm; trois entrées HTML (`index.html`, `platform.html`, `invite.html`) configurées dans `frontend/vite.config.ts`, avec bundles de page et chunk partagé (**VERIFIED**) |
+| Tableau de bord admin | IMPLEMENTED | `frontend/index.html`; entrée React `frontend/src/main.tsx`; carte Leaflet importée de npm (`frontend/src/dashboard/MapView.tsx`) (**VERIFIED**) |
+| Console opérateur de plateforme | IMPLEMENTED | `frontend/platform.html`; entrée React `frontend/src/platform.tsx`; routes `backend/app/platform/router.py:154-490` (**VERIFIED**) |
+| Page publique d'acceptation d'invitation | IMPLEMENTED | `frontend/invite.html`; entrée React `frontend/src/invite.tsx`; `backend/app/platform/invitations.py:145-191` (**VERIFIED**) |
 | Application mobile chauffeur Android/iOS | PARTIAL : queue persistante, batch et service foreground Android dans le code; appareil non vérifié | `queue.ts:1-90`, `tracker.ts:93-194,220-330`, `MainScreen.tsx:17-155`; le chemin iOS ne démarre pas le service Android. GPS, permissions et comportement suspendu/arrière-plan restent **UNVERIFIED** (**VERIFIED code; device UNKNOWN**) |
 | Dispatch, attribution de courses, ERP, fonctions ML | NOT IMPLEMENTED | Le README les place dans les phases futures (`./README.md:3`, `./README.md:167`) (**VERIFIED**) |
 | PostgreSQL de développement sous Compose | PARTIAL | Seul le service `postgres` est défini, pas de service backend/frontend (`backend/docker-compose.yml:1-15`) (**VERIFIED**) |
 | CI, registre d'images, déploiement staging/production, monitoring | NOT IMPLEMENTED dans le dépôt suivi | L'inventaire `git ls-files` ne contient ni pipeline CI ni manifeste de déploiement/monitoring ; README indique explicitement qu'ils sont différés (`./README.md:48-55`, `./README.md:167`) (**INFERRED**) |
-| Sauvegarde et test de restauration PostgreSQL | IMPLEMENTED comme scripts locaux; le propriétaire rapporte restore PASS pour les cinq tables comparées | `scripts/backup/backup-db.ps1:1-208`; `scripts/backup/restore-test.ps1:1-200` (**scripts VERIFIED; exécution OWNER-REPORTED**) |
+| Sauvegarde et test de restauration PostgreSQL | IMPLEMENTED comme scripts locaux; le propriétaire rapporte restore PASS pour les cinq tables comparées | `scripts/backup/backup-db.ps1:1-208`; `scripts/backup/restore-test.ps1:1-200` (**scripts vérifiés; exécution rapportée par le propriétaire**) |
 | Tâche quotidienne Windows de sauvegarde | PARTIAL : inscription manuelle possible | `scripts/backup/register-backup-task.ps1:1-42`; script inscrit une tâche « FleetBackup », mais son existence sur une machine est inconnue (**VERIFIED / UNKNOWN**) |
 | Tâches locales accessibles via console | PARTIAL et désactivé par défaut | `backend/main.py:70-109`; `backend/app/platform/devtasks/tasks.py:25-149`; la valeur d'exemple `DEV_TASKS_ENABLED` est désactivée (`.env.example:1-6`) (**VERIFIED**) |
 
@@ -64,11 +65,11 @@ Preuve des verbes/chemins : `backend/main.py:519-1195`, `backend/app/platform/ro
 
 ### Pages, écrans, scripts et tâches
 
-- Pages web : tableau de bord (`frontend/index.html:1-117`), console plateforme (`frontend/platform.html:1-199`), acceptation invitation (`frontend/invite.html:1-35`) — **IMPLEMENTED** (`frontend/README.md:7-18`).
+- Pages web : tableau de bord (`frontend/index.html`), console plateforme (`frontend/platform.html`), acceptation invitation (`frontend/invite.html`) — **IMPLEMENTED**; React/TypeScript et Vite configurent trois entrées de build (`frontend/vite.config.ts`).
 - Écrans mobiles : `TokenEntryScreen`, `MainScreen`, `SettingsScreen` — **IMPLEMENTED** ; démarrage app avec token enregistré (`DriverApp/App.tsx:1-86`; `TokenEntryScreen.tsx:1-127`; `MainScreen.tsx:1-239`; `SettingsScreen.tsx:1-130`). Suivi, file persistante et envoi par lot existent dans le code; le comportement sur téléphone reste **UNVERIFIED**.
 - Scripts backend : semer le centre par défaut, créer admin, créer premier super-admin, désactiver admin — **IMPLEMENTED** (`backend/scripts/seed_default_center.py:1-38`; `seed_admin.py:1-115`; `seed_super_admin.py:1-108`; `deactivate_admin.py:1-93`).
 - Scripts backup : `backup-db.ps1:1-208`, `restore-test.ps1:1-200`, `register-backup-task.ps1:1-42` — **IMPLEMENTED comme outils opérateur**, aucun résultat d'exécution réelle n'a été vérifié.
-- Tâches prédéfinies du lanceur : démarrer PostgreSQL local, état Docker, backup, test de restore, état/upgrade Alembic, tests backend, serveur statique frontend — **IMPLEMENTED comme catalogue facultatif** (`backend/app/platform/devtasks/tasks.py:25-149`).
+- Tâches prédéfinies du lanceur : démarrer PostgreSQL local, état Docker, backup, test de restore, état/upgrade Alembic, tests backend et serveur de développement Vite — **IMPLEMENTED comme catalogue facultatif** (`backend/app/platform/devtasks/tasks.py:25-149`). La tâche `frontend_serve` lance `npm.cmd run dev` et ne fonctionne donc que sous Windows.
 - Job planifié applicatif : aucun job de fond applicatif identifié ; sauvegarde Windows quotidienne installable manuellement seulement. État effectif de planification : **UNKNOWN** (`scripts/backup/register-backup-task.ps1:1-42`).
 
 ## 2. Modèle de données
@@ -131,7 +132,7 @@ Cette description reflète les modèles et migrations suivis, pas une introspect
 3. L'API hache le token reçu, cherche un chauffeur actif et dérive centre et identité de la ligne trouvée (`backend/main.py:363-377`).
 4. Désactivation remplace le hash par un hash d'un nouveau token jeté, désactive le chauffeur et l'annonce hors ligne. Réactivation/régénération renvoie un nouveau token et l'ancien ne correspond plus (`backend/main.py:618-682`).
 
-Ce parcours est **IMPLEMENTED**. Stockage AsyncStorage et transport HTTP clair dans les valeurs par défaut de développement sont des limites de protection (`DriverApp/src/api/client.ts:33-58`; `DriverApp/docs/TECHNICAL_DECISIONS.md:1-16`; `frontend/src/config.js:1-3`).
+Ce parcours est **IMPLEMENTED**. Stockage AsyncStorage et transport HTTP clair dans les valeurs par défaut de développement sont des limites de protection (`DriverApp/src/api/client.ts:33-58`; `DriverApp/docs/TECHNICAL_DECISIONS.md:1-16`; l'URL frontend par défaut est définie dans `frontend/src/api/client.ts`).
 
 ### Connexion admin et plateforme
 
@@ -211,30 +212,86 @@ L'application persiste une file locale AsyncStorage bornée à 1 000 positions, 
 | Validation des entrées | `AdminLogin`, gestion chauffeur/véhicule, `Loc`, `LocationBatch`, `Status` et modèles console déclarent `strict=True` et `extra="forbid"`; la validation métier des positions ajoute coordonnées, cap, vitesse, dates, précision, intervalle et vitesse plausible (`backend/main.py:343-448`; `backend/app/locations.py:37-80`; `backend/app/platform/router.py:67-134`; `backend/app/platform/invitations.py:161-169`). |
 | Injection SQL | Requêtes applicatives analysées emploient expressions SQLAlchemy (`backend/main.py:224-238,288-290,367-377,417-429,534-577`; `backend/app/platform/router.py:162-166,260-287,348-349,382-384,419-434,465-469`; `backend/app/platform/auth.py:41-61`; `backend/app/platform/invitations.py:48-68,96-115`). Exceptions migrations contiennent du SQL statique constant (`backend/alembic/versions/0002_admin_sessions.py:19`; `0003_platform_console.py:20-28`). Aucune concaténation SQL dynamique repérée (**INFERRED**). |
 | CORS / origine | Middleware allowlistée avec credentials et méthodes GET/POST/PATCH; websocket exige une origine connue ou même Host (`backend/main.py:47-55,92-100,259-279`). Ce contrôle ne chiffre pas le transport. |
-| HTTP clair | Exemples et URLs frontend/mobile de dev utilisent `http://`; donc confidentialité/intégrité du token chauffeur et des sessions admin dépend du réseau lorsque HTTP est utilisé (`frontend/src/config.js:1-3`; `backend/app/config.py:18-24`; `DriverApp/src/api/constants.ts:1-12`; `DriverApp/docs/TECHNICAL_DECISIONS.md:42-43`; `DriverApp/ios/DriverApp/Info.plist:27-35`). L'usage de HTTPS en déploiement n'est pas construit/vérifié. |
+| HTTP clair | L'URL frontend par défaut est `http://localhost:8000`; les valeurs de développement mobile utilisent aussi HTTP. La confidentialité/intégrité du token chauffeur et des sessions admin dépend du réseau lorsque HTTP est utilisé (`frontend/src/api/client.ts`; `backend/app/config.py:18-24`; `DriverApp/src/api/constants.ts:1-12`; `DriverApp/docs/TECHNICAL_DECISIONS.md:42-43`; `DriverApp/ios/DriverApp/Info.plist:27-35`). L'usage de HTTPS en déploiement n'est pas construit/vérifié. |
 | Jeton mobile local | AsyncStorage reçoit et relit le token en clair sur le stockage applicatif (`DriverApp/src/screens/TokenEntryScreen.tsx:19-38`; `DriverApp/src/api/client.ts:32-45`). README décision le confirme (`DriverApp/docs/TECHNICAL_DECISIONS.md:9-16`). |
 | Limitation de débit | Aucun limiteur de débit ni configuration associée identifiée dans les routes/dépendances; **ABSENT du code inspecté** (**INFERRED**, `backend/requirements.txt:1-11`; inventaire route ci-dessus). |
 | Logging/sensibles | Journal plateforme conserve IP client et User-Agent (200 caractères); échec de login stocke hash SHA-256 d'email (`backend/app/platform/audit.py:10-37`; `backend/app/platform/router.py:173-182`). Aucun numéro complet/tokens connus imprimés dans les logs du chemin normal vérifié; exceptions/audits runtime non exécutés. |
-| XSS dashboard | Construction DOM utilise `textContent` et éléments, pas d'insertion `innerHTML` repérée par recherche (`frontend/src/app.js:149-235,251-370`; `frontend/src/platform.js:83-126,165-245`; `frontend/src/invite.js:16-59`; recherche `rg "innerHTML|insertAdjacentHTML|\\.html\\s*=|textContent|replaceChildren" frontend/src`). Dépendances Leaflet chargées depuis CDN (`frontend/index.html:5-11,112-116`); protection SRI/self-hosting différée en phase 2 (`.github/copilot-instructions.md:65-68`). |
+| Rendu frontend / dépendances Leaflet | Les chaînes sont rendues par React ou par des nœuds DOM; aucune occurrence de `innerHTML`, `dangerouslySetInnerHTML` ou `insertAdjacentHTML` n'a été trouvée dans `frontend/src`. Leaflet et son CSS sont importés depuis npm (`frontend/package.json`, `frontend/src/dashboard/MapView.tsx`); aucune référence CDN à Leaflet ne subsiste dans le frontend. La carte charge toutefois les tuiles OpenStreetMap depuis leur service distant. La CSP n'est pas déployée; les en-têtes de sécurité restent différés. |
 | Réponses erreurs | Auth admin renvoie erreurs génériques; plateforme et invitation remplacent erreurs de validation par messages génériques (`backend/main.py:313-318`; `backend/app/platform/router.py:43-64`; `backend/app/platform/invitations.py:145-159`). |
 | Sauvegarde | Scripts de dump local, somme de contrôle, rétention, tâche planifiable et test restore partiel existent; le propriétaire rapporte restore PASS sur cinq tables. Aucun chiffrement ou stockage distant configuré n'est établi par le code (`scripts/backup/backup-db.ps1:1-208`; `scripts/backup/restore-test.ps1:1-200`; `scripts/backup/register-backup-task.ps1:1-42`). |
-| Pip audit | `pip-audit` non disponible dans le `PATH` vérifié (`Get-Command pip-audit` n'a retourné aucune commande); aucun résultat d'audit Python. |
-| NPM audit | `npm audit` exécuté dans `DriverApp/` sur le lockfile : **54 vulnérabilités (5 moderate, 49 high)**. La sortie suggère que `npm audit fix --force` implique notamment des mises à niveau majeures; aucun fix exécuté. Exécution brute vérifiée par sortie npm capturée durant l'audit. |
+| Pip audit | `pip-audit` n'a pas été exécuté pour cette mise à jour; l'état des dépendances Python n'est pas évalué ici (**NON VÉRIFIÉ**). |
+| NPM audit frontend | `npm audit` exécuté dans `frontend/` : **0 vulnérabilité** dans l'arbre audité à la date de cette vérification. Ce résultat concerne le lockfile frontend seulement. |
 
 ## 6. Tests
 
-- Backend : six modules unitaires suivis, dont `test_admin_auth.py`, `test_devtasks.py`, `test_fake_driver.py`, `test_invitations.py`, `test_locations.py`, `test_platform.py`; ils couvrent aussi validation/déduplication, lots, invitations, gestion admin, et broadcasts par centre (`backend/tests/`). Exécution observée antérieurement depuis `backend/` avec `DEV_TASKS_ENABLED=false` :
+- Backend : six modules unitaires suivis, dont `test_admin_auth.py`, `test_devtasks.py`, `test_fake_driver.py`, `test_invitations.py`, `test_locations.py`, `test_platform.py`; ils couvrent aussi validation/déduplication, lots, invitations, gestion admin, et broadcasts par centre (`backend/tests/`). Exécution effectuée pendant cette mise à jour depuis `backend/`, avec `DEV_TASKS_ENABLED` non défini et les tests d'intégration désactivés :
   ```powershell
   & 'C:\td\.venv\Scripts\python.exe' -m pytest -q
   ```
-- **Sortie observée : `160 passed, 1 warning in 18.63s`**; avertissement de dépréciation lié à l'usage de `httpx` avec Starlette `TestClient`. Ce résultat est celui d'une exécution antérieure, pas relancé pendant la présente mise à jour.
-- Les tests unitaires utilisent des doubles pour plusieurs parcours; trois tests d'intégration PostgreSQL sont présents sous `backend/tests_integration/test_vehicle_tenant_isolation.py` et protègent le nom de la base cible `fleet_integration_test` (`backend/tests_integration/conftest.py:19-61,102-136`). Le propriétaire rapporte **3 tests d'intégration réussis**; cette exécution n'a pas été reproduite par l'auditeur.
-- Mobile : suites Jest de l'application, du client API, de l'écran token, de la file et du tracker; les tests automatisés ne remplacent pas les essais GPS/permissions sur appareil. Comportement téléphone réel : **UNVERIFIED**, non testé par l'auditeur.
-- Pas de suite end-to-end navigateur ou device repérée dans l'inventaire suivi. Le README affirme un test téléphone/émulateur historique, mais ce résultat n'est pas vérifiable pendant cet audit (`./README.md:46`; aucune reproduction device accessible).
+- **Sortie observée** : `165 passed, 1 warning in 15.04s`. Le seul avertissement est une dépréciation Starlette liée à l'utilisation de `httpx` avec `TestClient`. Les tests d'intégration PostgreSQL n'ont pas été activés; aucun accès à une base n'a été effectué.
+- Sortie de commande :
+  ```text
+  ........................................................................ [ 43%]
+  ........................................................................ [ 87%]
+  .....................                                                    [100%]
+  ============================== warnings summary ===============================
+  ..\.venv\Lib\site-packages\fastapi\testclient.py:1
+    C:\td\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+      from starlette.testclient import TestClient as TestClient  # noqa
+
+  -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+  165 passed, 1 warning in 15.04s
+  ```
+- Les tests unitaires utilisent des doubles pour plusieurs parcours; trois tests d'intégration PostgreSQL sont présents sous `backend/tests_integration/test_vehicle_tenant_isolation.py` et protègent le nom de la base cible `fleet_integration_test` (`backend/tests_integration/conftest.py:19-61,102-136`). Le résultat **3 tests d'intégration réussis est rapporté par le propriétaire** et n'a pas été reproduit par l'auditeur.
+- Frontend : `npm test` dans `frontend/` utilise Vitest. Sortie :
+  ```text
+  > taxi-dispatching-web@1.0.0 test
+  > vitest run
+
+
+   RUN  v5.0.4 C:/td/frontend
+
+   Test Files  7 passed (7)
+        Tests  15 passed (15)
+     Start at  23:42:37
+     Duration  13.31s (environment 86%, import 7%, tests 5%, transform 1%)
+  ```
+- Frontend : `npm run lint` a terminé avec le code 0 et n'a émis aucune erreur; sortie :
+  ```text
+  > taxi-dispatching-web@1.0.0 lint
+  > eslint .
+  ```
+- Frontend : `npx tsc --noEmit` s'est terminé avec le code 0 sans sortie.
+- Frontend : `npm run build` s'est terminé avec le code 0. Sortie :
+  ```text
+  > taxi-dispatching-web@1.0.0 build
+  > vite build
+
+  vite v8.3.4 building client environment for production...
+  transforming...
+  ✓ 36 modules transformed.
+  rendering chunks...
+  computing gzip size...
+  dist/index.html                      0.61 kB │ gzip:  0.32 kB
+  dist/platform.html                   0.63 kB │ gzip:  0.34 kB
+  dist/invite.html                     0.71 kB │ gzip:  0.35 kB
+  dist/assets/invite-CozBYODC.css      0.14 kB │ gzip:  0.13 kB
+  dist/assets/shared-0vdGLciM.css      3.05 kB │ gzip:  1.17 kB
+  dist/assets/platform-CkL3m2Mo.css    6.76 kB │ gzip:  2.13 kB
+  dist/assets/main-CfKvadlV.css       24.85 kB │ gzip:  8.74 kB
+  dist/assets/invite-DARWe1iS.js       2.27 kB │ gzip:  1.04 kB
+  dist/assets/platform-BkYf_Lga.js    14.72 kB │ gzip:  4.02 kB
+  dist/assets/main-BNpD7g5D.js       174.79 kB │ gzip: 55.39 kB
+  dist/assets/shared-CSs5l-HM.js     223.72 kB │ gzip: 70.29 kB
+
+  ✓ built in 2.42s
+  ```
+- Frontend : `npm audit` s'est terminé avec le code 0 et la sortie exacte `found 0 vulnerabilities`.
+- Aucun test mobile ni vérification manuelle de parité avec l'ancien frontend n'a été exécuté pour cette mise à jour; aucun nombre de tests mobiles n'est rapporté. Le comportement réel sur téléphone et la parité fonctionnelle restent **UNVERIFIED**.
 
 ## 7. Exploitation et architecture
 
-Compose ne définit qu'une base Postgres 16 et un volume nommé; il n'y a pas de conteneur backend, frontend ou proxy (`backend/docker-compose.yml:1-15`). `start-backend.ps1` utilise le venv local et démarre Uvicorn lié à loopback (`start-backend.ps1:1-12`). Le frontend est servi séparément par `python -m http.server` suivant README (`frontend/README.md:7-16`). Variables identifiées : `DATABASE_URL`, `WEB_ORIGINS`, `FRONTEND_BASE_URL`, `DEV_TASKS_ENABLED`, `APP_ENV` (`backend/app/config.py:11-65`; `.env.example:1-6`).
+Compose ne définit qu'une base Postgres 16 et un volume nommé; il n'y a pas de conteneur backend, frontend ou proxy (`backend/docker-compose.yml:1-15`). `start-backend.ps1` utilise le venv local et démarre Uvicorn lié à loopback (`start-backend.ps1:1-12`). Vite sert le frontend en développement sur `localhost:5173`; la tâche `frontend_serve` lance `npm.cmd run dev` et est Windows uniquement (`frontend/package.json`; `backend/app/platform/devtasks/tasks.py:116-121`). Les trois entrées HTML sont configurées pour le build multipage (`frontend/vite.config.ts`). Variables identifiées : `DATABASE_URL`, `WEB_ORIGINS`, `FRONTEND_BASE_URL`, `DEV_TASKS_ENABLED`, `APP_ENV` et `VITE_API_BASE_URL` (`backend/app/config.py:11-65`; `.env.example:1-6`; `frontend/.env.example`).
 
 Sauvegarde : scripts PowerShell locaux et tâche Windows manuelle présents; pas de stockage hors disque local configuré ni service de supervision des sauvegardes (`scripts/backup/backup-db.ps1:1-208`; `register-backup-task.ps1:1-42`). Le propriétaire rapporte le test restore PASS pour cinq tables; ni ce résultat, ni la tâche sur l'hôte, ni l'existence/protection des fichiers n'ont été vérifiés par l'auditeur. CI/CD, registre, staging, déploiement cloud et monitoring sont **non réalisés** dans le dépôt suivi; ils figurent comme cible/phase suivante dans `./README.md:48-55,167`. L'état d'une machine réelle demeure **UNKNOWN**.
 
@@ -242,8 +299,7 @@ Sauvegarde : scripts PowerShell locaux et tâche Windows manuelle présents; pas
 
 | Gravité | Constat | État / preuve |
 |---|---|---|
-| Élevée | `npm audit` trouve 49 vulnérabilités high et 5 moderate dans l'arbre mobile verrouillé. | VERIFIED par commande; aucun correctif appliqué. |
-| Élevée | Pas de HTTPS imposé aux URL utilisées par les clients; token chauffeur en en-tête et session cookies seraient exposés en HTTP non fiable. | VERIFIED pour les valeurs par défaut/code; exploitation réseau non testée (`frontend/src/config.js:1-3`; `DriverApp/docs/TECHNICAL_DECISIONS.md:42-43`; cookies `backend/main.py:307-318`). |
+| Élevée | Pas de HTTPS imposé aux URL utilisées par les clients; token chauffeur en en-tête et session cookies seraient exposés en HTTP non fiable. | VERIFIED pour les valeurs par défaut/code; exploitation réseau non testée (`frontend/src/api/client.ts`; `DriverApp/docs/TECHNICAL_DECISIONS.md:42-43`; cookies `backend/main.py:307-318`). |
 | Élevée | Secret de développement local commité comme exemple dans README; valeur volontairement masquée ici. | VERIFIED (`backend/README.md:1-16`; `./README.md:94-108`). |
 | Moyenne | Pas de rate limiting identifié sur login, invitations, API ou WebSocket. | INFERRED de l'absence aux routes/dépendances; non testé sous charge. |
 | Moyenne | Règles Pydantic déclaratives strictes existent, mais validation métier, limites, intervalles de dates et lots doivent continuer à être exercées; aucun constat actuel d'absence `strict/extra` pour `Loc`, `Status` ou `LocationBatch`. | VERIFIED (`backend/main.py:421-448`; `backend/app/locations.py:37-80`). |
@@ -251,9 +307,9 @@ Sauvegarde : scripts PowerShell locaux et tâche Windows manuelle présents; pas
 | Moyenne | File et upload batch existent; capacité locale bornée à 1 000 points et rejets serveur peuvent entraîner la perte de points; fonctionnement de l'arrière-plan sur appareil et iOS non vérifié. | VERIFIED dans le code, comportement appareil UNVERIFIED (`DriverApp/src/location/queue.ts:1-90`; `tracker.ts:93-194,220-330`). |
 | Moyenne | Durée de conservation/rotation des positions et journaux non configurée; disque local des backups demeure point unique de défaillance. | Scripts observables; rétention concerne fichiers seulement (`scripts/backup/backup-db.ps1:42-116`). |
 | Faible | `zones`, `driver_status_logs` et potentiellement des champs véhicule/admin ne sont pas utilisés dans les flux observés. | INFERRED, voir section 2. |
-| Faible | Les contraintes véhicule tenant dépendent de la migration 0006; état appliqué non introspecté, application rapportée par le propriétaire. | VERIFIED code/ migration; DB application OWNER-REPORTED (`backend/app/models.py:193-216`; `backend/alembic/versions/0006_vehicle_tenant_uniqueness.py:34-107`). |
+| Faible | Les contraintes véhicule tenant dépendent de la migration 0006; état appliqué non introspecté, application rapportée par le propriétaire. | Modèles et migration vérifiés; application en base rapportée par le propriétaire (`backend/app/models.py:193-216`; `backend/alembic/versions/0006_vehicle_tenant_uniqueness.py:34-107`). |
 | Faible | TODO de retrait du lanceur DEV existe; artefacts UI/README de dev task restent dans le repo mais conditionnels. | VERIFIED (`backend/main.py:70-111`; `.env.example:4`). |
-| Faible | Leaflet est référencé depuis CDN sans SRI; politique SRI est différée d'après règles projet. | VERIFIED (`frontend/index.html:5-11,112-116`; `.github/copilot-instructions.md:65-68`). |
+| Faible | La CSP n'est pas déployée; les tuiles cartographiques viennent d'OpenStreetMap. | CSP absente de la configuration de déploiement du MVP; aucune référence CDN à Leaflet dans le frontend. |
 
 Les gravités expriment une priorité de suivi pour le contexte d'un MVP local; ce ne sont pas des scores de probabilité calculés.
 
@@ -265,16 +321,16 @@ Les gravités expriment une priorité de suivi pour le contexte d'un MVP local; 
 4. Réception GPS, permissions réelles et continuité lors verrouillage/app en arrière-plan sur chaque version Android/iOS ciblée. Ces comportements restent non vérifiés sur téléphone.
 5. Statut de tests end-to-end historiques mentionnés dans README; l'audit ne peut pas les reproduire.
 6. Validité, rotation et exposition des secrets locaux ou variables d'environnement en place; aucune valeur `.env` n'a été demandée ou inspectée.
-7. NPM audit reflète l'état consulté du registre et du lockfile à cette date; l'exploitabilité effective du graphe dans les builds réellement livrés et la disponibilité de mises à jour compatibles restent à confirmer.
+7. Le résultat `npm audit` vaut pour le lockfile frontend consulté le 13 octobre 2026; il ne constitue pas une validation d'autres lockfiles ou d'un artefact mobile.
 
 ## 10. Résultats/outils exécutés
 
 - Tree courant : migrations Alembic 0001 à 0006; 0005 déduplique `(driver_id, recorded_at)`, 0006 ajoute `vehicles.center_id` et contraintes uniques par centre. Application 0005/0006 **rapportée par le propriétaire**, non vérifiée par connexion DB.
-- `DEV_TASKS_ENABLED=false`, depuis `backend/`: exécution antérieure `pytest -q` → `160 passed, 1 warning in 18.63s`.
-- Tests d'intégration PostgreSQL : le propriétaire rapporte `3 passed`; non reproduits par l'auditeur. Test de restauration : le propriétaire rapporte `PASS` pour les cinq tables comparées par le script; non reproduit par l'auditeur.
-- Une tentative `npm audit` depuis la racine échoue faute de lockfile racine (`ENOLOCK`); depuis `DriverApp/`, `npm audit` → `54 vulnerabilities (5 moderate, 49 high)`.
-- `pip-audit` : commande indisponible.
-- Une première tentative `pytest` depuis la racine échoue à la collecte faute de résolution des modules backend; relancée depuis `backend/` dans les conditions ci-dessus, elle passe.
+- Depuis `backend/`, `DEV_TASKS_ENABLED` non défini au lancement : `pytest -q` → `165 passed, 1 warning in 15.04s`; aucun test d'intégration ni accès base.
+- Tests d'intégration PostgreSQL : **3 tests réussis, rapporté par le propriétaire**, non reproduits par l'auditeur. Test de restauration : **PASS pour les cinq tables, rapporté par le propriétaire**, non reproduit par l'auditeur.
+- Depuis `frontend/`, `npm test` → 7 fichiers et 15 tests passés; `npm run lint` et `npx tsc --noEmit` terminent avec code 0; `npm run build` produit les trois entrées HTML, trois bundles de page et un chunk partagé.
+- Depuis `frontend/`, `npm audit` → `found 0 vulnerabilities`.
+- `pip-audit` : commande indisponible lors d'un contrôle antérieur; non relancé pour cette mise à jour.
 - Comportement réel de l'application sur téléphone : **UNVERIFIED**; aucun test device effectué par l'auditeur.
-- Compilation courante du rapport : deux passes `pdflatex -interaction=nonstopmode -halt-on-error`, code 0 chacune; détails, pages et avertissements dans `docs/report/README.md`.
+- Compilation courante du rapport : deux passes `pdflatex -interaction=nonstopmode -halt-on-error`; résultats, pages, références non définies et erreurs consignés après compilation dans `docs/report/README.md`.
 - Aucune connexion base, commande psql, lecture `.env`, mise à jour de dépendance ou modification applicative.

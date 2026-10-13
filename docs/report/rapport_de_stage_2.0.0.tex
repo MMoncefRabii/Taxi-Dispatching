@@ -58,12 +58,12 @@ Période & \textit{À compléter}\\
 \textit{Espace réservé aux remerciements personnels, à compléter par l'étudiant. Aucun nom n'est supposé dans ce document.}
 
 \section*{Résumé}
-Ce rapport présente l'audit d'un MVP de suivi de flotte destiné aux petits opérateurs de taxis et de véhicules. Le système réunit une application mobile chauffeur, une API FastAPI, PostgreSQL et un tableau de bord web. Il comprend la gestion des chauffeurs et administrateurs de centre, la validation des positions, l'ingestion par lots, ainsi qu'une file locale persistante et un service de suivi Android en arrière-plan. Ces fonctions mobiles sont présentes dans le code, mais n'ont pas été vérifiées sur un appareil réel. Les tests backend s'appuient principalement sur des bases simulées. Le déploiement industrialisé, le monitoring et la vérification terrain restent des travaux à mener.
+Ce rapport présente l'audit d'un MVP de suivi de flotte destiné aux petits opérateurs de taxis et de véhicules. Le système réunit une application mobile chauffeur, une API FastAPI, PostgreSQL et un frontend web React/TypeScript construit avec Vite. Celui-ci comporte trois entrées indépendantes — tableau admin, console plateforme et acceptation d'invitation — et intègre Leaflet depuis npm. Le système comprend aussi la gestion des chauffeurs et administrateurs de centre, la validation des positions, l'ingestion par lots, ainsi qu'une file locale persistante et un service de suivi Android en arrière-plan. Ces fonctions mobiles sont présentes dans le code, mais n'ont pas été vérifiées sur un appareil réel. Les tests backend s'appuient principalement sur des bases simulées. Le déploiement industrialisé, le monitoring et la vérification terrain restent des travaux à mener.
 
-\textbf{Mots-clés :} suivi GPS, flotte, multi-tenant, FastAPI, React Native, PostgreSQL.
+\textbf{Mots-clés :} suivi GPS, flotte, multi-tenant, FastAPI, React Native, React, Vite, PostgreSQL.
 
 \section*{Abstract}
-This report audits a minimum viable fleet-tracking system for small taxi and vehicle operators. It combines a driver mobile app, a FastAPI service, PostgreSQL and a web dashboard. The code includes driver and center-admin management, validated location intake, batch uploads, a persistent local queue, and an Android background location service. These mobile capabilities have not been verified on a real device. Backend tests rely primarily on mocked database sessions. Production deployment, monitoring and field validation remain future work.
+This report audits a minimum viable fleet-tracking system for small taxi and vehicle operators. It combines a driver mobile app, a FastAPI service, PostgreSQL and a React/TypeScript web frontend built with Vite. The frontend has three independent HTML entry points for the center dashboard, platform console and invitation acceptance; Leaflet is bundled from npm. The code includes driver and center-admin management, validated location intake, batch uploads, a persistent local queue, and an Android background location service. These mobile capabilities have not been verified on a real device. Backend tests rely primarily on mocked database sessions. Production deployment, monitoring and field validation remain future work.
 
 \textbf{Keywords:} GPS tracking, fleet, multi-tenant, FastAPI, React Native, PostgreSQL.
 
@@ -133,8 +133,8 @@ Les sources ne justifient aucune affirmation de prix, part de marché, performan
 \node[box] (driver) {Application chauffeur\\React Native, file locale\\service Android};
 \node[box,right=of driver] (api) {API\\FastAPI asynchrone};
 \node[store,right=of api] (db) {PostgreSQL};
-\node[box,above=of api] (web) {Tableau admin\\HTML / JS};
-\node[box,below=of api] (platform) {Console plateforme\\HTML / JS};
+\node[box,above=of api] (web) {Tableau admin\\React + TypeScript\\Leaflet via npm};
+\node[box,below=of api] (platform) {Console plateforme + invitation\\React + TypeScript\\Entrées Vite multipages};
 \node[box,right=of web] (ws) {WebSocket\\par centre};
 \node[box,below=of db] (backup) {Scripts locaux\\backup + test restore};
 \draw[link] (db) -- (backup);
@@ -227,7 +227,10 @@ FastAPI asynchrone & Framework synchrone & API et accès SQLAlchemy asynchrones;
 PostgreSQL & SQLite ou base managée & Stockage relationnel pour centres, comptes, véhicules, positions et journaux. & Exploitation et sauvegarde à gérer; Compose ne fournit que PostgreSQL local (\path{docker-compose.yml}).\\
 SQLAlchemy + Alembic & SQL direct et DDL manuel & Modèles relationnels et historique de migration suivi jusqu'à la révision 0006. & Le schéma appliqué n'est pas vérifié; les migrations doivent être exécutées et validées dans l'environnement cible (\path{models.py}, migrations Alembic 0001--0006).\\
 React Native & Deux applications natives distinctes & Base TypeScript commune aux projets Android et iOS. & Permissions et comportement doivent être validés sur les appareils visés; le service d'arrière-plan explicite est Android (\path{package.json}, \path{tracker.ts}).\\
-Interface web statique & SPA lourde & Trois pages HTML/CSS/JS et petits clients API; pas d'étape de compilation frontend web. & Responsabilité de l'état et de la validation repose sur le code navigateur (frontend statique).\\
+React + TypeScript & JavaScript sans framework & Composants réutilisables, état d'interface explicite et typage des échanges; cohérent avec les formulaires et tableaux du produit. & Le typage ne valide pas à lui seul les réponses réseau; chaîne Node, compilation et dépendances à maintenir.\\
+Vite & Serveur de fichiers statiques seul ou autre bundler & Serveur de développement rapide et build multipage adapté aux trois documents HTML suivis. & Ajoute un outil de build et une étape de production; le navigateur ne sert pas directement les modules source en production.\\
+Build multipage Vite & SPA à entrée unique & Les entrées index, platform et invite gardent leurs parcours et bundles d'entrée séparés; le build extrait aussi un chunk partagé. & Pas de routeur applicatif commun; une SPA pourrait unifier la navigation, mais regrouperait les parcours dans une seule application cliente.\\
+Leaflet direct, importé de npm & react-leaflet ou cartes hébergées complètes & API cartographique éprouvée sans wrapper React supplémentaire; la carte est intégrée dans un composant React via ses effets. & La synchronisation du cycle de vie Leaflet reste explicite; react-leaflet fournirait des composants déclaratifs au prix d'une dépendance et d'une couche d'abstraction supplémentaires.\\
 Cookies de session côté navigateur & JWT bearer & Sessions opaques côté serveur, révocables, HttpOnly; séparation admin/plateforme par cookies et tables. & Dépend de TLS en déploiement et d'une politique d'origine correcte (routes d'authentification).\\
 Jeton chauffeur opaque hashé & Compte/mot de passe chauffeur & Onboarding par admin sans compte autonome; un token peut être remplacé. & Pas de renouvellement périodique ni de coffre mobile documenté; AsyncStorage.\\
 Colonne \texttt{center\_id} & Base séparée par client ou RLS & Mutualisation de tables avec filtre explicite de centre; choix simple à déployer pour le MVP (interprétation). & Une omission de filtre applicatif aurait un impact transversal; isolation RLS n'est pas construite (revue des requêtes).\\
@@ -318,12 +321,16 @@ React Native / React & Application chauffeur & 0.87.1 et 19.2.3 fixes dans le ma
 TypeScript / navigation React Native & Types et navigation & TypeScript intervalle \texttt{\^6.0.3}; navigation \texttt{\^7.5.0}/\texttt{\^7.20.0}.\\
 react-native-geolocation-service & Lecture GPS foreground & \texttt{\^5.3.1}.\\
 AsyncStorage & Stockage app & \texttt{\^3.1.1}.\\
-HTML, CSS, JavaScript, Leaflet & Interface web cartographique et consoles & Leaflet 1.9.4 référencé par CDN; versions HTML/JS non applicables.\\
+React / React DOM & Interface web et composants & 19.3.0 / 19.3.0, versions exactes de \texttt{frontend/package.json}.\\
+TypeScript / Vite / plugin React & Typage, dev server et build multipage & 6.0.3 / 8.3.4 / 6.1.2, versions exactes.\\
+Vitest / ESLint & Tests et lint frontend & 5.0.4 / 10.12.0, versions exactes.\\
+Leaflet & Carte web, importée via npm & 1.9.4; les fichiers JS, CSS et icônes sont intégrés au build, pas servis depuis un CDN.\\
+HTML / CSS & Trois documents d'entrée frontend & \texttt{index.html}, \texttt{platform.html}, \texttt{invite.html}; Vite produit une entrée par page et un chunk de code partagé.\\
 pytest / httpx (développement) & Tests backend & pytest 8.4.2 et httpx 0.28.1 exacts dans \texttt{requirements-dev.txt}.\\
 \bottomrule
 \end{longtable}
 \normalsize
-\textit{Sources : manifestes \path{requirements.txt}, \path{requirements-dev.txt} et \path{package.json}, Compose et HTML frontend. Les contraintes mobiles avec caret ne sont pas des épingles exactes.}
+\textit{Sources : manifestes \path{requirements.txt}, \path{requirements-dev.txt}, \path{DriverApp/package.json} et \path{frontend/package.json}, configuration Vite et Compose. Les versions frontend du tableau sont épinglées exactement dans le manifeste. Les contraintes mobiles avec caret ne sont pas des épingles exactes.}
 
 \section{Sécurité : mesures en place et lacunes}
 
@@ -338,13 +345,24 @@ pytest / httpx (développement) & Tests backend & pytest 8.4.2 et httpx 0.28.1 e
 \end{itemize}
 
 \subsection{Lacunes}
-Pas de limitation de débit, de MFA/TOTP ni de récupération de mot de passe; aucun TLS de déploiement n'est livré et les configurations de développement utilisent HTTP; le jeton chauffeur est conservé dans AsyncStorage; aucune RLS. Le journal plateforme conserve une adresse IP et un User-Agent; les guides contiennent un exemple de secret de développement, ici non reproduit. Au moment de l'audit, \texttt{pip-audit} n'était pas disponible dans le \texttt{PATH}; \texttt{npm audit} lancé dans \texttt{DriverApp} signalait 54 vulnérabilités (5 modérées, 49 élevées). Aucun correctif de dépendance n'a été appliqué; l'exploitabilité dans un build réellement livré reste à vérifier. Résultats et références détaillés : \texttt{docs/audit/AUDIT-2.0.0.md}.
+Pas de limitation de débit, de MFA/TOTP ni de récupération de mot de passe; aucun TLS de déploiement n'est livré et les configurations de développement utilisent HTTP; le jeton chauffeur est conservé dans AsyncStorage; aucune RLS. Aucune CSP n'est déployée à ce stade. Le journal plateforme conserve une adresse IP et un User-Agent; les guides contiennent un exemple de secret de développement, ici non reproduit. \texttt{npm audit} exécuté pendant cette révision dans \texttt{frontend/} a retourné \texttt{found 0 vulnerabilities}; ce résultat ne couvre pas l'arbre mobile. Aucun correctif de dépendance n'a été appliqué. Résultats et références détaillés : \texttt{docs/audit/AUDIT-2.0.0.md}.
 
 \section{Tests et validation}
 
-La commande backend a été lancée lors de la vérification précédente depuis \texttt{backend} avec \path{DEV_TASKS_ENABLED=false}. Sortie observée : \texttt{160 passed, 1 warning in 18.63s}. L'avertissement signale une dépréciation liée à \texttt{httpx} avec Starlette \texttt{TestClient}. Les tests unitaires couvrent les modules d'authentification admin, tâches de développement, chauffeur simulé, invitations, positions et plateforme; plusieurs fixtures simulent les sessions SQLAlchemy. Le propriétaire rapporte séparément que les trois tests d'intégration PostgreSQL ont réussi; ce résultat n'a pas été reproduit ici. Il rapporte également l'application des migrations 0005/0006 et un PASS au test de restauration des cinq tables. Ces résultats sont donc des déclarations du propriétaire, pas des vérifications effectuées pour cette révision documentaire.
+Dans \texttt{frontend/}, les commandes ont produit les résultats suivants durant cette révision :
+\begin{itemize}
+\item \texttt{npm test} : Vitest \texttt{v5.0.4}, \texttt{Test Files 7 passed (7)} et \texttt{Tests 15 passed (15)}; durée observée \texttt{13.31s}.
+\item \texttt{npm run lint} : ESLint \texttt{eslint .} a terminé avec le code 0, sans diagnostic.
+\item \texttt{npx tsc --noEmit} : code 0, aucune sortie.
+\item \texttt{npm run build} : Vite \texttt{8.3.4}, 36 modules transformés, build terminé en \texttt{2.42s}; trois pages HTML et trois bundles d'entrée, avec un chunk partagé.
+\item \texttt{npm audit} : sortie exacte \texttt{found 0 vulnerabilities}.
+\end{itemize}
 
-Les tests Jest mobiles comptent 15 cas répartis sur cinq suites : application, client API, saisie de jeton, file et tracker. Le lancement complet a eu deux échecs de délai/mocks dans la suite TokenEntryScreen; relancée seule, cette suite a réussi 2/2. L'échec complet n'est donc pas qualifié de succès ni diagnostiqué comme résolu. Aucune validation GPS, permission, arrière-plan ou téléphone réel n'a été effectuée pour ce rapport; l'essai historique mentionné par le README n'a pas été reproduit.
+Dans \texttt{backend/}, la commande \texttt{python -m pytest -q} a été exécutée avec \path{DEV_TASKS_ENABLED} non défini et les tests d'intégration désactivés. Sortie : \texttt{165 passed, 1 warning in 15.04s}. L'avertissement est une dépréciation Starlette liée à l'utilisation de \texttt{httpx} avec \texttt{TestClient}. Les modules couvrent notamment l'authentification admin, les tâches de développement, le chauffeur simulé, les invitations, les positions et la plateforme; plusieurs fixtures simulent les sessions SQLAlchemy.
+
+Aucun accès à une base n'a été effectué. Le propriétaire rapporte que trois tests d'intégration PostgreSQL ont réussi, que les migrations 0005/0006 ont été appliquées et que le test de restauration a produit PASS pour cinq tables; ces éléments sont rapportés par le propriétaire et n'ont pas été vérifiés ici.
+
+Aucun test mobile n'a été lancé pour cette révision; aucun compte de tests mobiles n'est rapporté. Les permissions, le GPS, l'arrière-plan et le comportement sur téléphone réel restent non vérifiés. La parité fonctionnelle manuelle entre l'ancien frontend et React n'a pas été vérifiée dans cette révision.
 
 \section{Comparaison qualitative}
 
@@ -375,11 +393,12 @@ La solution proposée ne prétend pas dépasser les offres établies en maturit�
 \item \textbf{Priorité 4 — sauvegarde et isolation :} examiner le résultat rapporté PASS, répéter périodiquement la restauration et ajouter une copie indépendante; relancer les tests d'intégration multi-centres dans un environnement de test dédié.
 \item \textbf{Priorité 5 — exploitation cible :} conteneuriser l'application, automatiser tests/build, mettre en place staging/production, journalisation/supervision et alertes backup. Tout cela est prévu, non réalisé.
 \item \textbf{Priorité 6 — produit :} préciser dispatch, flux de paiement et besoins métier avant leur implémentation. Aucun paiement n'est actuellement réalisé.
+\item \textbf{Frontend Web :} comparer manuellement la parité fonctionnelle avec l'ancienne interface, toujours non vérifiée ici; déployer une CSP au reverse proxy avant exposition publique. La tâche de développement \texttt{frontend\_serve} utilise \texttt{npm.cmd} et ne fonctionne que sous Windows.
 \end{enumerate}
 
 \section{Conclusion}
 
-Le dépôt fournit un MVP avec collecte unitaire et par lots, file locale persistante, suivi Android en arrière-plan, gestion des chauffeurs et véhicules, visualisation WebSocket par centre, ainsi que des scripts locaux de sauvegarde et de restauration par comparaison de comptages. Les sessions chauffeur, admin et plateforme sont distinctes; l'existence du code ne remplace pas une validation en environnement réel. Les tests backend ont réussi lors de l'exécution précédente; le propriétaire rapporte trois tests d'intégration réussis, l'application des migrations 0005/0006 et un PASS du test restore cinq tables. Ces trois résultats ne sont pas reproduits dans cette révision. Le comportement sur téléphone reste non vérifié. La prochaine étape doit privilégier la validation terrain, l'inspection PostgreSQL autorisée, la restauration périodique et l'industrialisation.
+Le dépôt fournit un MVP avec collecte unitaire et par lots, file locale persistante, suivi Android en arrière-plan, gestion des chauffeurs et véhicules, visualisation WebSocket par centre, et un frontend React/TypeScript/Vite en trois pages d'entrée avec Leaflet importé de npm. Les sessions chauffeur, admin et plateforme sont distinctes; l'existence du code ne remplace pas une validation en environnement réel. Durant cette révision, les tests frontend (15 tests) et backend (165 tests) ont réussi; le propriétaire rapporte trois tests d'intégration réussis, l'application des migrations 0005/0006 et un PASS du test restore cinq tables. Ces derniers résultats ne sont pas reproduits ici. Le comportement sur téléphone, la parité fonctionnelle manuelle, et la CSP restent non vérifiés ou non déployés. La prochaine étape doit privilégier la validation terrain, l'inspection PostgreSQL autorisée, la restauration périodique et l'industrialisation.
 
 \section*{Bibliographie}
 \addcontentsline{toc}{section}{Bibliographie}
@@ -394,7 +413,7 @@ Traccar, « Traccar », page officielle consultée le 10 octobre 2026.
 Uber, « Drive », page officielle consultée le 10 octobre 2026. Cette page ne permet pas d'établir des caractéristiques de dispatch ou de gestion de flotte; toute comparaison correspondante reste à vérifier.
 \url{https://www.uber.com/us/en/drive/}.
 \bibitem{project}
-Dépôt Taxi-Dispatching, code et documentation suivis, audit du 10 octobre 2026; références précises dans \texttt{docs/audit/AUDIT-2.0.0.md}.
+Dépôt Taxi-Dispatching, code et documentation suivis, audit du 13 octobre 2026; références précises dans \texttt{docs/audit/AUDIT-2.0.0.md}.
 \end{thebibliography}
 
 \appendix
@@ -444,6 +463,7 @@ Nom & Usage\\
 \path{DATABASE_URL} & Connexion SQLAlchemy PostgreSQL.\\
 \path{WEB_ORIGINS} & Origines Web autorisées, séparées par virgule.\\
 \path{FRONTEND_BASE_URL} & Base URL pour les liens d'invitation.\\
+\path{VITE_API_BASE_URL} & Origine de l'API utilisée au build par le frontend; défaut \texttt{http://localhost:8000}, sans secret.\\
 \path{DEV_TASKS_ENABLED} & Active les outils locaux uniquement en development; faux par défaut.\\
 \path{LOCATION_MAX_FUTURE_SECONDS} & Tolérance des horodatages futurs.\\
 \path{LOCATION_MAX_AGE_LIVE_SECONDS} & Âge maximal des positions unitaires.\\
@@ -462,9 +482,12 @@ Aucune valeur n'est reproduite. La valeur effective de chaque variable sur la ma
 \item État réel de la base et données par centre. Le propriétaire rapporte que les migrations 0005/0006 sont appliquées; non vérifié directement.
 \item Existence et protection des fichiers de sauvegarde, planification effective, copie indépendante. Le PASS du test restore sur cinq tables est rapporté par le propriétaire, non reproduit ici.
 \item Usage HTTPS effectif, valeurs de configuration locales et sécurité réseau.
-\item GPS et permissions sur téléphone réel, continuité lorsque l'application est suspendue, et résultat du test téléphone historique indiqué dans le README; comportement mobile **non vérifié**.
+\item GPS et permissions sur téléphone réel, continuité lorsque l'application est suspendue, et résultat du test téléphone historique indiqué dans le README; comportement mobile non vérifié.
+\item Parité fonctionnelle manuelle entre l'ancien frontend et les pages React; aucune vérification manuelle de parité n'a été effectuée dans cette révision.
+\item Une CSP en production n'est pas déployée; les tuiles de carte utilisent le service distant OpenStreetMap.
+\item La tâche locale \texttt{frontend\_serve} utilise \texttt{npm.cmd} et est Windows uniquement; les commandes npm elles-mêmes ne sont pas limitées à Windows.
 \item Charge, fonctionnement multi-processus WebSocket, supervision et comportement en production.
-\item Exploitabilité réelle des avis NPM dans une livraison; versions disponibles compatibles après la date de l'audit.
+\item \texttt{npm audit} retourne zéro vulnérabilité dans le lockfile frontend au 13 octobre 2026; le statut d'autres lockfiles ou de futurs builds n'en est pas déduit.
 \item Éléments tiers marqués « à vérifier » dans l'état de l'art : fonctions, tarifs, intégrations locales et conditions des offres de télématique; compatibilité matérielle, fonctions et modalités de service Traccar; fonctions de flotte, accès et disponibilité régionale des plateformes de mobilité; choix de produits et capacités des applications génériques.
 \item Cellules « à vérifier » du tableau comparatif pour les fournisseurs : SaaS multi-tenant, coûts, gouvernance/contrôle des données, personnalisation, effort d'installation, maturité, support, matériel et échelle. Aucune cellule fournisseur n'est une conclusion vérifiée.
 \item Effet précis de la tâche locale qui lance \texttt{docker compose up -d} sans nom de service, selon le répertoire et le contexte Compose d'exécution.
