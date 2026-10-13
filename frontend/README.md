@@ -33,12 +33,12 @@ The default is `http://localhost:8000`. Vite exposes only variables prefixed wit
 ## Pages
 
 - `/` (`index.html`): center admin dashboard, ported in Part B.
-- `/platform.html`: platform-owner console entry point; implementation remains for Part C.
-- `/invite.html`: public invitation entry point; implementation remains for Part D. The completed page will take the token from user input rather than a URL.
+- `/platform.html`: platform-owner console for center creation, center-admin invitations, audit log pagination, and development tasks when the API enables them.
+- `/invite.html`: public invitation acceptance page. Enter the one-time token in the form; it is never read from the URL or stored in browser storage.
 
 All pages are independent HTML entry points in Vite's multi-page build. Shared API, UI components, and stylesheet code are separated from the dashboard.
 
-The current staged migration only implements the center dashboard. The platform and invitation pages are shells until Parts C and D are requested and completed.
+The three entry points are separate Vite bundles. The platform console imports shared UI/API code but does not import dashboard code. Invitation acceptance sends its request without browser credentials and clears its form fields after submission.
 
 ## Build and checks
 
@@ -58,14 +58,14 @@ Set a production CSP at the reverse proxy and replace `https://api.example.com` 
 default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org; font-src 'self'; connect-src 'self' https://api.example.com wss://api.example.com
 ```
 
-## Platform owner setup (after Part C)
+## Platform owner setup
 
-After Part C is implemented, the platform console will be at <http://localhost:5173/platform.html>. Bootstrap the first platform owner from `backend/` with `python -m scripts.seed_super_admin --email owner@example.com`; see the backend README for the hidden password prompts.
+The platform console is at <http://localhost:5173/platform.html>. Bootstrap the first platform owner from `backend/` with `python -m scripts.seed_super_admin --email owner@example.com`; see the backend README for the hidden password prompts.
 
 `FRONTEND_BASE_URL` in the backend defaults to `http://localhost:5173` and is used to construct `/invite.html` links. Keep it an HTTP(S) origin without a trailing slash.
 
-## Development tasks (after Part C)
+## Development tasks
 
-After Part C is implemented, the platform console's Dev tasks section is available only when the backend is started with `DEV_TASKS_ENABLED=true` and `APP_ENV=development`. The task runner is disabled by default and refuses to start in production. It exposes only fixed, allowlisted local-development tasks and does not accept arbitrary commands.
+The platform console's Dev tasks section is available only when `GET /platform/dev/tasks` succeeds with HTTP 200. The task runner is disabled by default and refuses to start in production. It exposes only fixed, allowlisted local-development tasks and does not accept arbitrary commands. Audit events use limit/offset pagination.
 
 The `frontend_serve` service runs this project's Vite dev server at <http://localhost:5173/>. Task output remains in memory only for the current backend process.

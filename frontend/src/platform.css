@@ -42,8 +42,9 @@ button, input { font: inherit; }
 
 .login-view {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 24px;
 }
 
@@ -56,6 +57,7 @@ button, input { font: inherit; }
 
 .login-card {
   width: min(420px, 100%);
+  margin: auto;
   padding: 30px;
 }
 
@@ -196,16 +198,14 @@ input:focus-visible, button:focus-visible, a:focus-visible {
 
 .form-grid {
   display: grid;
-  grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1fr);
-  align-items: center;
-  gap: 0 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
 }
 
-.form-grid label { margin-bottom: 16px; }
-.form-grid input { margin-bottom: 16px; }
-.form-grid .form-message, .form-grid .button { grid-column: 1 / -1; }
-.form-grid .form-message { margin-bottom: 4px; }
-.form-grid .button { justify-self: start; }
+.form-grid .form-field { margin: 0; }
+.form-grid .form-field input { margin: 0; }
+.form-grid .form-message, .form-grid .btn { grid-column: 1 / -1; }
+.form-grid .btn { justify-self: start; }
 
 .table-panel { padding: 0; overflow: hidden; }
 .table-panel .panel-heading { padding: 20px 20px 0; }
@@ -240,6 +240,14 @@ tbody tr:last-child td { border-bottom: 0; }
 .modal-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
 .invitation-warning { margin: 4px 0; font-weight: 700; }
 td .button { margin: 2px 6px 2px 0; }
+.invitation-panel { margin-top: 20px; }
+.pagination-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 14px 0 0; }
+.dev-task-parameter { display: grid; gap: 6px; margin: 14px 0; color: var(--muted); font-size: 0.85rem; }
+.dev-task-parameter input { margin: 0; }
+.dev-tools-section { display: grid; gap: 16px; margin-top: 24px; }
+.dev-task-status.idle { color: var(--muted); }
+.brand { display: inline-block; }
+.login-link { font-weight: 700; }
 
 .dev-tools-banner {
   padding: 13px 16px;

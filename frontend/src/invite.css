@@ -2,6 +2,6 @@
 .invite-card form { display: grid; }
 .login-link {
   display: inline-block;
-  color: #fff;
+  color: var(--accent);
   text-decoration: none;
 }

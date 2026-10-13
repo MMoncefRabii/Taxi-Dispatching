@@ -40,7 +40,7 @@ The interactive API documentation is available at `/docs` when the backend is ru
 
 ### Admin Dashboard
 
-The standalone browser frontend lives in `frontend/` and is built with React, TypeScript, Vite, Leaflet, and OpenStreetMap tiles. The center dashboard shows drivers with known coordinates, a searchable/filterable driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. Admins can create drivers with vehicles, edit details, deactivate/reactivate drivers, and regenerate active-driver tokens. Reactivation and regeneration tokens are shown once and must be given to the driver then. The dashboard receives WebSocket updates. Dashboard access uses per-admin email/password accounts and an eight-hour HTTP-only session cookie. Its API address is configured with `VITE_API_BASE_URL` in `frontend/.env`. In the current migration stage, the platform and invitation entry points are shells; their features are Parts C and D.
+The standalone browser frontend lives in `frontend/` and is built with React, TypeScript, Vite, Leaflet, and OpenStreetMap tiles. The center dashboard shows drivers with known coordinates, a searchable/filterable driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. Admins can create drivers with vehicles, edit details, deactivate/reactivate drivers, and regenerate active-driver tokens. Reactivation and regeneration tokens are shown once and must be given to the driver then. The dashboard receives WebSocket updates. Dashboard access uses per-admin email/password accounts and an eight-hour HTTP-only session cookie. Its API address is configured with `VITE_API_BASE_URL` in `frontend/.env`. The platform-owner console at `/platform.html` manages centers and invitations, displays a paginated audit log, and exposes the allowlisted development task controls only when enabled by the API. The public `/invite.html` page accepts invitation tokens from its input form and does not put them in the URL or browser storage.
 
 ### Driver App
 
@@ -70,8 +70,8 @@ The standalone browser frontend lives in `frontend/` and is built with React, Ty
 ├── backend/                 Python API, database models/migrations, scripts, and tests
 ├── frontend/                Standalone React/TypeScript admin web frontend
 │   ├── index.html            Center dashboard
-│   ├── platform.html         Platform-owner console entry point (Part C pending)
-│   ├── invite.html           Invitation acceptance entry point (Part D pending)
+│   ├── platform.html         Platform-owner console
+│   ├── invite.html           Invitation acceptance page
 │   └── src/                  React pages, shared UI/API, and styles
 ├── frontend-legacy/          Preserved pre-React frontend
 ├── DriverApp/               React Native mobile app (TypeScript)
@@ -128,7 +128,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://localhost:5173/](http://localhost:5173/). The dashboard calls the backend at `http://localhost:8000` by default; set `VITE_API_BASE_URL` in `frontend/.env` to use a different API origin. If you change the frontend origin or API address, set `WEB_ORIGINS` for the backend to the exact frontend origin (comma-separated if there are multiple). The backend allows only configured web origins for credentialed HTTP requests and WebSocket connections. In production, keep the frontend and API on the same site: admin sessions use `SameSite=Strict` cookies. The platform and invitation URLs exist but their page features remain pending Parts C and D.
+Open [http://localhost:5173/](http://localhost:5173/) for the dashboard, or use `/platform.html` for the platform console and `/invite.html` to accept an invitation. The frontend calls the backend at `http://localhost:8000` by default; set `VITE_API_BASE_URL` in `frontend/.env` to use a different API origin. If you change the frontend origin or API address, set `WEB_ORIGINS` for the backend to the exact frontend origin (comma-separated if there are multiple). The backend allows only configured web origins for credentialed HTTP requests and WebSocket connections. In production, keep the frontend and API on the same site: admin and platform sessions use `SameSite=Strict` cookies.
 
 ### 3. Create a test driver
 
