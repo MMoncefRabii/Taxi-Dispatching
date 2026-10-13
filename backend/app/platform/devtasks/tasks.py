@@ -115,16 +115,9 @@ TASKS = (
     TaskSpec(
         id="frontend_serve",
         label="Serve frontend",
-        description="Serve the static frontend on localhost:5173.",
+        description="Run the Vite frontend dev server on localhost:5173.",
         kind="service",
-        command=(
-            sys.executable,
-            "-m",
-            "http.server",
-            "5173",
-            "--bind",
-            "localhost",
-        ),
+        command=("npm.cmd", "run", "dev"),
         cwd=FRONTEND_DIR,
     ),
 )

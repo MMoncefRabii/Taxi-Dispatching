@@ -41,6 +41,11 @@ html, body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+#root {
+  width: 100%;
+  height: 100%;
+}
+
 body {
   overflow: hidden;
 }
@@ -456,18 +461,22 @@ body {
 }
 
 .login-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 900;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow-y: auto;
+  padding: 16px;
   background: rgba(10, 18, 28, 0.38);
   backdrop-filter: blur(4px);
 }
 
 .login-box {
   width: min(420px, calc(100vw - 32px));
+  margin: auto;
+  flex: 0 0 auto;
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 18px;

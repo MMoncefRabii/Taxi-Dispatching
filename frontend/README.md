@@ -1,6 +1,13 @@
-# Admin Web Frontend
+# Fleet Tracker Web Frontend
 
-The admin dashboard is a standalone static web app built with HTML, CSS, and vanilla JavaScript. It runs in the browser; Python is only used below as a local static file server. The frontend is separate from the Python backend and the React Native driver app.
+The standalone web frontend is a multi-page React, TypeScript, and Vite application. It is served separately from the FastAPI backend and the React Native driver app.
+
+## Install
+
+```powershell
+Set-Location .\frontend
+npm ci
+```
 
 ## Run locally
 
@@ -8,46 +15,57 @@ Start the backend as described in the repository root README. In another PowerSh
 
 ```powershell
 Set-Location .\frontend
-python -m http.server 5173 --bind localhost
+npm run dev
 ```
 
-Open <http://localhost:5173/>. The API base URL is set in `src/config.js`; the default is `http://localhost:8000`. If the frontend is served from a different origin, add that exact origin to the backend's comma-separated `WEB_ORIGINS` setting and restart the backend. For production, serve the frontend and API from the same site because admin and platform sessions use `SameSite=Strict` cookies.
+Vite binds to `localhost:5173` and exits if that port is already occupied. Open <http://localhost:5173/> for the center dashboard. Add the exact frontend origin to the backend's comma-separated `WEB_ORIGINS` setting and restart the backend. Admin and platform sessions use HTTP-only `SameSite=Strict` cookies; in production, serve the frontend and API from the same site.
 
-The platform-owner console is available at <http://localhost:5173/platform.html>. It uses the same configured API base URL and credentialed, HTTP-only platform session cookie. Bootstrap the first platform owner from `backend/` with `python -m scripts.seed_super_admin --email owner@example.com`; see the backend README for the hidden password prompts.
+## Configuration
 
-## Center admin invitations
+Copy `.env.example` to `.env` when a non-default API URL is needed:
 
-From the platform console, use **Invite admin** for a center. The console shows a non-secret invitation page link and a separate one-time token once. Send the token to the invitee through a separate secure channel; the token is not embedded in the link. The invitee opens `invite.html`, enters the token, and chooses a password of 12–128 characters. The token expires after 48 hours and can be used once. The link and token are cleared from the console dialog when it closes and are not stored by the frontend.
+```dotenv
+VITE_API_BASE_URL=http://localhost:8000
+```
 
-Set `FRONTEND_BASE_URL` in the backend environment to the frontend base URL used to build invitation links. It defaults to `http://localhost:5173` and must be an HTTP(S) URL without a trailing slash. Add the exact frontend origin to `WEB_ORIGINS` as well so the browser can call the API.
+The default is `http://localhost:8000`. Vite exposes only variables prefixed with `VITE_`; do not put secrets in frontend environment variables.
 
-## Center driver management
+## Pages
 
-Center admins can create drivers with a vehicle, edit driver and vehicle details, deactivate or reactivate a driver, and regenerate an active driver's token. The vehicle form's **Model** field uses the existing `vehicles.type` column; taxi number and plate are required. Plates are trimmed, uppercased, and limited to letters, numbers, spaces, and hyphens.
+- `/` (`index.html`): center admin dashboard, ported in Part B.
+- `/platform.html`: platform-owner console for center creation, center-admin invitations, audit log pagination, and development tasks when the API enables them.
+- `/invite.html`: public invitation acceptance page. Enter the one-time token in the form; it is never read from the URL or stored in browser storage.
 
-Reactivate and **New token** actions show the token once in the existing token dialog. A regenerated/reactivated token must be passed to the driver through a secure channel; the prior token stops working immediately. Closing the dialog clears the token from the page and the dashboard's in-memory token variable. The dashboard does not persist driver tokens in browser storage.
+All pages are independent HTML entry points in Vite's multi-page build. Shared API, UI components, and stylesheet code are separated from the dashboard.
 
-## Center admin management
+The three entry points are separate Vite bundles. The platform console imports shared UI/API code but does not import dashboard code. Invitation acceptance sends its request without browser credentials and clears its form fields after submission.
 
-Use the **Admins** view to list admins in the signed-in admin's center. Active admins can be deactivated, except for the signed-in admin; the backend also prevents deactivating the last active admin in a center. Deactivation revokes that admin's existing sessions. A deactivated admin must be reactivated by a platform owner.
+## Build and checks
 
-## Development tasks in the platform console
+```powershell
+npm run lint
+npx tsc --noEmit
+npm test
+npm run build
+npm audit
+```
 
-The platform console's **Dev tasks** section is available only when the backend is started with `DEV_TASKS_ENABLED=true` and `APP_ENV=development`. The task runner is disabled by default and refuses to start in production. It exposes only the fixed, allowlisted local-development tasks shown in the console; it does not accept arbitrary commands. Run the console on the same machine as the backend, and sign in as a platform owner.
+## Reverse-proxy Content Security Policy
 
-Use `start-backend.ps1` from the repository root to start the backend with the root `.venv` and load settings from `backend/.env`. Enable the task runner only for local development. The console can start the backend's PostgreSQL container, show running containers, inspect or upgrade the Alembic revision, run the backend test suite (optionally selecting a `tests/test_*.py` module), and start or stop the frontend static server.
+Set a production CSP at the reverse proxy and replace `https://api.example.com` with the API origin. OpenStreetMap tiles require the listed image origin. Leaflet updates map layout styles dynamically, hence the style directive permits inline styles; scripts remain self-hosted.
 
-Output is kept in memory for the current backend process and is discarded when it stops. The `frontend_serve` task serves this directory at <http://localhost:5173/>.
+```text
+default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org; font-src 'self'; connect-src 'self' https://api.example.com wss://api.example.com
+```
 
-## Files
+## Platform owner setup
 
-- `index.html`: dashboard document and UI markup.
-- `src/styles.css`: dashboard styling.
-- `src/app.js`: browser behavior and HTTP/WebSocket API client.
-- `src/config.js`: backend API base URL.
-- `platform.html`: platform-owner login and console document.
-- `src/platform.css`: platform console styling.
-- `src/platform.js`: platform console API client and UI behavior.
-- `invite.html`: public center-admin invitation acceptance page.
-- `src/invite.css`: invitation page styling.
-- `src/invite.js`: invitation acceptance behavior.
+The platform console is at <http://localhost:5173/platform.html>. Bootstrap the first platform owner from `backend/` with `python -m scripts.seed_super_admin --email owner@example.com`; see the backend README for the hidden password prompts.
+
+`FRONTEND_BASE_URL` in the backend defaults to `http://localhost:5173` and is used to construct `/invite.html` links. Keep it an HTTP(S) origin without a trailing slash.
+
+## Development tasks
+
+The platform console's Dev tasks section is available only when `GET /platform/dev/tasks` succeeds with HTTP 200. The task runner is disabled by default and refuses to start in production. It exposes only fixed, allowlisted local-development tasks and does not accept arbitrary commands. Audit events use limit/offset pagination.
+
+The `frontend_serve` service runs this project's Vite dev server at <http://localhost:5173/>. Task output remains in memory only for the current backend process.

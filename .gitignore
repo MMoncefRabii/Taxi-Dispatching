@@ -15,6 +15,7 @@ backups/
 # JavaScript dependencies and generated output
 node_modules/
 coverage/
+/frontend/dist/
 DriverApp/android/.gradle/
 DriverApp/android/app/build/
 DriverApp/android/build/
