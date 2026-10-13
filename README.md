@@ -7,7 +7,7 @@ Fleet Tracker is a real-time GPS tracking system for taxi drivers and fleet oper
 ```text
 Driver mobile app (React Native / TypeScript) ──HTTP──┐
                                                       ├──> Backend (Python / FastAPI) ──> PostgreSQL
-Admin web frontend (HTML / CSS / JavaScript) ─HTTP/WS─┘
+Admin web frontend (React / TypeScript) ─HTTP/WS─┘
 ```
 
 These are separate applications. The web frontend and driver app call the backend API; changing their UI does not require changing backend code unless the API contract also changes. The web frontend is independently served from `frontend/`, and the backend does not serve frontend files.
@@ -40,7 +40,7 @@ The interactive API documentation is available at `/docs` when the backend is ru
 
 ### Admin Dashboard
 
-The standalone browser dashboard lives in `frontend/`. It uses HTML, CSS, vanilla JavaScript, Leaflet, and OpenStreetMap tiles to show drivers with known coordinates, a driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. Admins can create drivers with vehicles, edit details, deactivate/reactivate drivers, and regenerate active-driver tokens. Reactivation and regeneration tokens are shown once and must be given to the driver then. The dashboard receives WebSocket updates and refreshes the driver list periodically. Dashboard access uses per-admin email/password accounts and an eight-hour HTTP-only session cookie. Its API address is configured independently in `frontend/src/config.js`.
+The standalone browser frontend lives in `frontend/` and is built with React, TypeScript, Vite, Leaflet, and OpenStreetMap tiles. The center dashboard shows drivers with known coordinates, a searchable/filterable driver list, and online, stale, or offline indicators. A driver is considered online when their stored online flag is set and their latest location is no more than 60 seconds old; a driver without a location is shown as offline. Admins can create drivers with vehicles, edit details, deactivate/reactivate drivers, and regenerate active-driver tokens. Reactivation and regeneration tokens are shown once and must be given to the driver then. The dashboard receives WebSocket updates. Dashboard access uses per-admin email/password accounts and an eight-hour HTTP-only session cookie. Its API address is configured with `VITE_API_BASE_URL` in `frontend/.env`. In the current migration stage, the platform and invitation entry points are shells; their features are Parts C and D.
 
 ### Driver App
 
@@ -59,7 +59,7 @@ The standalone browser dashboard lives in `frontend/`. It uses HTML, CSS, vanill
 ## Tech Stack
 
 - Backend: Python, FastAPI, Pydantic Settings, SQLAlchemy 2.0 async, Alembic, PostgreSQL.
-- Web frontend: HTML, CSS, vanilla JavaScript, Leaflet 1.9.4, OpenStreetMap tiles.
+- Web frontend: React, TypeScript, Vite, Leaflet 1.9.4, OpenStreetMap tiles.
 - Android/iOS driver app: React Native 0.87, TypeScript, React Navigation, AsyncStorage, `react-native-geolocation-service`.
 - Live updates: FastAPI WebSockets.
 
@@ -68,9 +68,12 @@ The standalone browser dashboard lives in `frontend/`. It uses HTML, CSS, vanill
 ```text
 .
 ├── backend/                 Python API, database models/migrations, scripts, and tests
-├── frontend/                Standalone admin web frontend (HTML, CSS, JavaScript)
-│   ├── index.html
-│   └── src/                 styles.css, app.js, and API URL config.js
+├── frontend/                Standalone React/TypeScript admin web frontend
+│   ├── index.html            Center dashboard
+│   ├── platform.html         Platform-owner console entry point (Part C pending)
+│   ├── invite.html           Invitation acceptance entry point (Part D pending)
+│   └── src/                  React pages, shared UI/API, and styles
+├── frontend-legacy/          Preserved pre-React frontend
 ├── DriverApp/               React Native mobile app (TypeScript)
 │   ├── android/             Android native project
 │   ├── ios/                 iOS native project
@@ -117,14 +120,15 @@ The API documentation is at [http://localhost:8000/docs](http://localhost:8000/d
 
 ### 2. Run the web frontend independently
 
-In a separate PowerShell terminal, serve the static frontend:
+In a separate PowerShell terminal, run the Vite frontend:
 
 ```powershell
 Set-Location .\frontend
-python -m http.server 5173 --bind localhost
+npm ci
+npm run dev
 ```
 
-Open [http://localhost:5173/](http://localhost:5173/). The Python command above only serves static files; the dashboard itself runs in the browser and is not Python. It calls the backend at `http://localhost:8000`, as configured in `frontend/src/config.js`. If you change the frontend origin or API address, update the API URL and set `WEB_ORIGINS` for the backend to the exact frontend origin (comma-separated if there are multiple). The backend allows only configured web origins for credentialed HTTP requests and WebSocket connections. In production, keep the frontend and API on the same site: admin sessions use `SameSite=Strict` cookies.
+Open [http://localhost:5173/](http://localhost:5173/). The dashboard calls the backend at `http://localhost:8000` by default; set `VITE_API_BASE_URL` in `frontend/.env` to use a different API origin. If you change the frontend origin or API address, set `WEB_ORIGINS` for the backend to the exact frontend origin (comma-separated if there are multiple). The backend allows only configured web origins for credentialed HTTP requests and WebSocket connections. In production, keep the frontend and API on the same site: admin sessions use `SameSite=Strict` cookies. The platform and invitation URLs exist but their page features remain pending Parts C and D.
 
 ### 3. Create a test driver
 

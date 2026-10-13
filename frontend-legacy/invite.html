@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Accept invitation | Fleet Tracker</title>
+  <link rel="stylesheet" href="./src/platform.css" />
+  <link rel="stylesheet" href="./src/invite.css" />
+</head>
+<body>
+  <main class="login-view">
+    <section class="login-card invite-card">
+      <p class="eyebrow">Fleet Tracker · Center admin</p>
+      <h1>Accept invitation</h1>
+      <form id="inviteForm">
+        <label for="tokenInput">One-time token</label>
+        <input id="tokenInput" name="token" type="text" maxlength="128" autocomplete="off" required />
+        <label for="passwordInput">Choose a password</label>
+        <input id="passwordInput" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required />
+        <label for="passwordConfirmInput">Confirm password</label>
+        <input id="passwordConfirmInput" name="password_confirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" required />
+        <p id="inviteMessage" class="message" role="alert" aria-live="polite"></p>
+        <button id="acceptButton" class="button primary" type="submit">Create account</button>
+      </form>
+      <section id="successView" hidden>
+        <p class="message success" role="status">Account created</p>
+        <a class="button primary login-link" href="./index.html">Go to login</a>
+      </section>
+    </section>
+  </main>
+  <script src="./src/config.js"></script>
+  <script src="./src/invite.js"></script>
+</body>
+</html>

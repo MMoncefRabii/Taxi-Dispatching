@@ -300,6 +300,8 @@ def test_allowlisted_commands_are_argument_sequences():
     assert by_id["alembic_upgrade"].command[-2:] == ("upgrade", "head")
     assert by_id["run_tests"].command[-2:] == ("pytest", "-q")
     assert by_id["frontend_serve"].cwd == FRONTEND_DIR
+    assert by_id["frontend_serve"].kind == "service"
+    assert by_id["frontend_serve"].command == ("npm.cmd", "run", "dev")
     for task in TASKS:
         assert isinstance(task.command, tuple)
         assert all(not dangerous.intersection(argument) for argument in task.command)
