@@ -121,12 +121,18 @@ def use_admin(app, db, *, host=("127.0.0.1", 50000)):
 
 def test_disabled_feature_does_not_register_dev_routes(monkeypatch):
     monkeypatch.setattr(settings, "dev_tasks_enabled", False)
+    monkeypatch.setattr(settings, "app_env", "production")
     app = main.create_app()
 
     with TestClient(app, client=("127.0.0.1", 50000)) as client:
         response = client.get("/platform/dev/tasks")
+        docs_responses = [
+            client.get(path)
+            for path in ("/docs", "/redoc", "/openapi.json")
+        ]
 
     assert response.status_code == 404
+    assert [response.status_code for response in docs_responses] == [404, 404, 404]
 
 
 def test_enabled_feature_refuses_production_startup(monkeypatch):
@@ -148,8 +154,13 @@ def test_dev_routes_reject_missing_or_center_admin_cookie(
         if cookie_name is not None:
             client.cookies.set(cookie_name, "center-admin-session")
         response = client.get("/platform/dev/tasks")
+        docs_responses = [
+            client.get(path)
+            for path in ("/docs", "/redoc", "/openapi.json")
+        ]
 
     assert response.status_code == 401
+    assert [response.status_code for response in docs_responses] == [200, 200, 200]
     event = mock_db.added[0]
     assert isinstance(event, PlatformAuditLog)
     assert event.target_type == "dev_task"

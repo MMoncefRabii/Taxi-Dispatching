@@ -36,7 +36,7 @@ The FastAPI service in `backend/main.py` implements:
 
 Location validation uses server time, a 60-second future allowance, a 5-minute live age limit, a 6-hour batch age limit, a 2-second minimum interval, a 200 km/h speed limit, and a 50 m accuracy limit. These limits can be configured with the `LOCATION_*` variables in `.env.example`.
 
-The interactive API documentation is available at `/docs` when the backend is running.
+The interactive API documentation is available at `/docs` in development; `/docs`, `/redoc`, and `/openapi.json` are disabled in production.
 
 ### Admin Dashboard
 
@@ -46,7 +46,7 @@ The standalone browser frontend lives in `frontend/` and is built with React, Ty
 
 `DriverApp/` contains a React Native 0.87 TypeScript app with token entry, an online/offline switch, settings for the backend URL, and Android foreground-service location tracking. The app stores the driver token and a bounded offline location queue in AsyncStorage. While online and permitted, `react-native-geolocation-service` collects fixes on a 7-second interval and the app batches queued points to the backend. The Android foreground service is intended to keep tracking active while the app is backgrounded or the screen is locked; this behavior still requires real-device verification. The app shows queued and dropped/rejected counts, the last successful sync time, and textual sync errors. iOS background tracking is out of scope and untested.
 
-**End-to-end status:** Real phone/emulator location has been confirmed appearing live on the admin dashboard.
+**End-to-end status:** Location appearing live on the admin dashboard from a real phone/emulator is **unverified**; no device test was reproduced for this report.
 
 ## What's Not Built Yet
 

@@ -118,9 +118,11 @@ Cette description reflète les modèles et migrations suivis, pas une introspect
 - `centers`, `admins`, `super_admins`, `drivers`, `vehicles`, `driver_locations`, `audit_logs`, `admin_sessions`, `platform_sessions`, `platform_audit_log`, `admin_invitations` ont des références d'exécution dans les routes, scripts ou authentifications (`backend/main.py`; `backend/app/platform/router.py`; `backend/app/platform/auth.py`; `backend/app/platform/invitations.py`; `backend/app/platform/audit.py`; `backend/scripts/`). **VERIFIED**.
 - `zones` n'a, parmi le code Python suivi, qu'un modèle et une relation SQLAlchemy, pas de route de gestion identifiée : table non utilisée par le parcours applicatif actuel (**INFERRED**, `backend/app/models.py:29-30,229-237`; routes inventoriées plus haut).
 - `driver_status_logs` n'a, parmi le code Python suivi, qu'un modèle/relation, et aucun ajout d'événement de statut dans `/status` ou `/location` : table apparemment inutilisée (**INFERRED**, `backend/app/models.py:188-191,220-227`; `backend/main.py:684-749`).
-- `vehicles.active` et `vehicles.deactivated_at` existent en schéma mais le code de gestion met à jour le véhicule sans exploiter ces champs : potentiellement non utilisés (**INFERRED**, `backend/app/models.py:193-204`; `backend/main.py:484-525`).
+- `centers.deactivated_at`, `vehicles.active` et `vehicles.deactivated_at` existent dans le schéma, sans usage applicatif identifié (**INFERRED**, `backend/app/models.py:20-31,207-218`; recherches des références applicatives).
 - `super_admins` n'est pas inutilisée : authentification et console s'en servent ; `last_login` est mis à jour à la connexion plateforme. `admins.last_login` est présent, mais aucune mise à jour à la connexion admin n'a été repérée (**VERIFIED / INFERRED**, `backend/app/platform/router.py:162-204`; `backend/main.py:281-318`; modèles `backend/app/models.py:35-73`).
-- `vehicles.center_id` est une FK/index non nullable; taxi et plaque sont uniques par centre. La migration 0006 retire l'unicité globale du taxi et vérifie les doublons avant l'ajout des contraintes (`backend/alembic/versions/0006_vehicle_tenant_uniqueness.py:34-107`; `backend/app/models.py:193-216`). Migration appliquée : **rapporté par le propriétaire**, non vérifié directement.
+- `vehicles.center_id` est une FK/index non nullable; taxi et plaque sont uniques par centre. La migration 0006 retire l'unicité globale du taxi et vérifie les doublons avant l'ajout des contraintes (`backend/alembic/versions/0006_vehicle_tenant_uniqueness.py:34-107`; `backend/app/models.py:193-216`). Le schéma ne comporte toutefois pas de contrainte composite garantissant que `vehicles.center_id` égale le `center_id` du chauffeur référencé par `vehicles.driver_id`; les deux FK indépendantes ne l'imposent pas. Migration appliquée : **rapporté par le propriétaire**, non vérifié directement.
+
+**Liste du schéma sans usage applicatif identifié :** tables `zones` et `driver_status_logs`; colonnes `centers.deactivated_at`, `vehicles.active` et `vehicles.deactivated_at`. Il s'agit d'une conclusion issue du code suivi, pas d'une introspection de la base.
 
 ## 3. Parcours logiques
 
@@ -215,7 +217,7 @@ L'application persiste une file locale AsyncStorage bornée à 1 000 positions, 
 | Jeton mobile local | AsyncStorage reçoit et relit le token en clair sur le stockage applicatif (`DriverApp/src/screens/TokenEntryScreen.tsx:19-38`; `DriverApp/src/api/client.ts:32-45`). README décision le confirme (`DriverApp/docs/TECHNICAL_DECISIONS.md:9-16`). |
 | Limitation de débit | Aucun limiteur de débit ni configuration associée identifiée dans les routes/dépendances; **ABSENT du code inspecté** (**INFERRED**, `backend/requirements.txt:1-11`; inventaire route ci-dessus). |
 | Logging/sensibles | Journal plateforme conserve IP client et User-Agent (200 caractères); échec de login stocke hash SHA-256 d'email (`backend/app/platform/audit.py:10-37`; `backend/app/platform/router.py:173-182`). Aucun numéro complet/tokens connus imprimés dans les logs du chemin normal vérifié; exceptions/audits runtime non exécutés. |
-| XSS dashboard | Construction DOM utilise `textContent` et éléments, pas d'insertion `innerHTML` repérée par recherche (`frontend/src/app.js:149-235,251-370`; `frontend/src/platform.js:83-126,165-245`; `frontend/src/invite.js:16-59`; recherche `rg "innerHTML|insertAdjacentHTML|\\.html\\s*=|textContent|replaceChildren" frontend/src`). Dépendances Leaflet chargées depuis CDN (`frontend/index.html:5-11,112-116`); protection SRI/self-hosting différée en phase 2 (`.github/copilot-instructions.md:65-68`). |
+| XSS dashboard | Le frontend React construit ses éléments par rendu React; aucun constat d'insertion HTML non échappée n'est rapporté ici. |
 | Réponses erreurs | Auth admin renvoie erreurs génériques; plateforme et invitation remplacent erreurs de validation par messages génériques (`backend/main.py:313-318`; `backend/app/platform/router.py:43-64`; `backend/app/platform/invitations.py:145-159`). |
 | Sauvegarde | Scripts de dump local, somme de contrôle, rétention, tâche planifiable et test restore partiel existent; le propriétaire rapporte restore PASS sur cinq tables. Aucun chiffrement ou stockage distant configuré n'est établi par le code (`scripts/backup/backup-db.ps1:1-208`; `scripts/backup/restore-test.ps1:1-200`; `scripts/backup/register-backup-task.ps1:1-42`). |
 | Pip audit | `pip-audit` non disponible dans le `PATH` vérifié (`Get-Command pip-audit` n'a retourné aucune commande); aucun résultat d'audit Python. |
@@ -223,14 +225,15 @@ L'application persiste une file locale AsyncStorage bornée à 1 000 positions, 
 
 ## 6. Tests
 
-- Backend : six modules unitaires suivis, dont `test_admin_auth.py`, `test_devtasks.py`, `test_fake_driver.py`, `test_invitations.py`, `test_locations.py`, `test_platform.py`; ils couvrent aussi validation/déduplication, lots, invitations, gestion admin, et broadcasts par centre (`backend/tests/`). Exécution observée antérieurement depuis `backend/` avec `DEV_TASKS_ENABLED=false` :
+- Backend : les tests couvrent authentification admin, documentation API, tâches de développement, chauffeur simulé, invitations, positions et plateforme (`backend/tests/`). Exécution demandée depuis `backend/` avec `DEV_TASKS_ENABLED` non défini :
   ```powershell
   & 'C:\td\.venv\Scripts\python.exe' -m pytest -q
   ```
-- **Sortie observée : `160 passed, 1 warning in 18.63s`**; avertissement de dépréciation lié à l'usage de `httpx` avec Starlette `TestClient`. Ce résultat est celui d'une exécution antérieure, pas relancé pendant la présente mise à jour.
+- **Sortie observée pour cette révision : `165 passed, 1 warning in 12.96s`** avec `DEV_TASKS_ENABLED` non défini. L'avertissement signale la dépréciation de `httpx` avec Starlette `TestClient`.
+- Frontend : 16 tests Vitest au total, soit 15 tests préexistants et le nouveau test de régression du cadrage de carte; exécuter `npm test` depuis `frontend/`.
 - Les tests unitaires utilisent des doubles pour plusieurs parcours; trois tests d'intégration PostgreSQL sont présents sous `backend/tests_integration/test_vehicle_tenant_isolation.py` et protègent le nom de la base cible `fleet_integration_test` (`backend/tests_integration/conftest.py:19-61,102-136`). Le propriétaire rapporte **3 tests d'intégration réussis**; cette exécution n'a pas été reproduite par l'auditeur.
-- Mobile : suites Jest de l'application, du client API, de l'écran token, de la file et du tracker; les tests automatisés ne remplacent pas les essais GPS/permissions sur appareil. Comportement téléphone réel : **UNVERIFIED**, non testé par l'auditeur.
-- Pas de suite end-to-end navigateur ou device repérée dans l'inventaire suivi. Le README affirme un test téléphone/émulateur historique, mais ce résultat n'est pas vérifiable pendant cet audit (`./README.md:46`; aucune reproduction device accessible).
+- Mobile : 17 tests Jest dans les suites application, client API, écran token, file et tracker; trois exécutions complètes ont réussi (5 suites et 17 tests chacune). Les tests automatisés ne remplacent pas les essais GPS/permissions sur appareil. Comportement téléphone réel : **UNVERIFIED**, non testé par l'auditeur.
+- Pas de suite end-to-end navigateur ou device repérée dans l'inventaire suivi. Le README marque le résultat sur téléphone/émulateur comme **UNVERIFIED**; aucune reproduction device n'est accessible.
 
 ## 7. Exploitation et architecture
 
@@ -250,31 +253,32 @@ Sauvegarde : scripts PowerShell locaux et tâche Windows manuelle présents; pas
 | Moyenne | Token chauffeur persistant via AsyncStorage, sans mécanisme sécurisé natif documenté. | VERIFIED (`DriverApp/src/screens/TokenEntryScreen.tsx:19-38`; décision: `DriverApp/docs/TECHNICAL_DECISIONS.md:9-16`). |
 | Moyenne | File et upload batch existent; capacité locale bornée à 1 000 points et rejets serveur peuvent entraîner la perte de points; fonctionnement de l'arrière-plan sur appareil et iOS non vérifié. | VERIFIED dans le code, comportement appareil UNVERIFIED (`DriverApp/src/location/queue.ts:1-90`; `tracker.ts:93-194,220-330`). |
 | Moyenne | Durée de conservation/rotation des positions et journaux non configurée; disque local des backups demeure point unique de défaillance. | Scripts observables; rétention concerne fichiers seulement (`scripts/backup/backup-db.ps1:42-116`). |
-| Faible | `zones`, `driver_status_logs` et potentiellement des champs véhicule/admin ne sont pas utilisés dans les flux observés. | INFERRED, voir section 2. |
-| Faible | Les contraintes véhicule tenant dépendent de la migration 0006; état appliqué non introspecté, application rapportée par le propriétaire. | VERIFIED code/ migration; DB application OWNER-REPORTED (`backend/app/models.py:193-216`; `backend/alembic/versions/0006_vehicle_tenant_uniqueness.py:34-107`). |
+| Faible | Tables `zones`, `driver_status_logs` et colonnes `centers.deactivated_at`, `vehicles.active`, `vehicles.deactivated_at` sans usage applicatif identifié. | INFERRED, voir section 2. |
+| Faible | Aucune contrainte composite n'impose que `vehicles.center_id` corresponde au centre du chauffeur référencé; les FK actuelles valident séparément les deux identifiants. | VERIFIED dans les modèles et migrations suivis (`backend/app/models.py:193-218`; `backend/alembic/versions/0001_initial_schema.py:57-75`, `0006_vehicle_tenant_uniqueness.py:95-126`). |
+| Faible | Les contraintes d'unicité véhicule par tenant dépendent de la migration 0006; état appliqué non introspecté, application rapportée par le propriétaire. | VERIFIED code/migration; DB application OWNER-REPORTED (`backend/app/models.py:193-216`; `backend/alembic/versions/0006_vehicle_tenant_uniqueness.py:34-107`). |
 | Faible | TODO de retrait du lanceur DEV existe; artefacts UI/README de dev task restent dans le repo mais conditionnels. | VERIFIED (`backend/main.py:70-111`; `.env.example:4`). |
-| Faible | Leaflet est référencé depuis CDN sans SRI; politique SRI est différée d'après règles projet. | VERIFIED (`frontend/index.html:5-11,112-116`; `.github/copilot-instructions.md:65-68`). |
 
 Les gravités expriment une priorité de suivi pour le contexte d'un MVP local; ce ne sont pas des scores de probabilité calculés.
 
 ## 9. Éléments que seul le propriétaire peut vérifier — UNVERIFIED
 
-1. Nombre de lignes, contraintes/index réels, centre par défaut et comptes présents. Le propriétaire rapporte que 0005 et 0006 sont appliquées, mais cet état n'a pas été vérifié directement.
+1. Nombre de lignes, contraintes/index réels et comptes présents. Le propriétaire rapporte que 0005 et 0006 sont appliquées, mais cet état n'a pas été vérifié directement.
 2. Présence et protection des fichiers backup, fonctionnement quotidien, tâche Windows effective, stockage indépendant et capacité/rétention disque. Le propriétaire rapporte un test de restauration PASS sur cinq tables; l'auditeur ne l'a pas reproduit.
 3. Démarrage avec les variables et services de sa machine, accès effectif des opérateurs, exposition réseau, HTTPS réel, configuration pare-feu et résultat d'un scénario multi-centre réel.
 4. Réception GPS, permissions réelles et continuité lors verrouillage/app en arrière-plan sur chaque version Android/iOS ciblée. Ces comportements restent non vérifiés sur téléphone.
-5. Statut de tests end-to-end historiques mentionnés dans README; l'audit ne peut pas les reproduire.
+5. Tout éventuel résultat historique de test end-to-end sur téléphone/émulateur; aucun résultat n'a été reproduit ni vérifié indépendamment.
 6. Validité, rotation et exposition des secrets locaux ou variables d'environnement en place; aucune valeur `.env` n'a été demandée ou inspectée.
 7. NPM audit reflète l'état consulté du registre et du lockfile à cette date; l'exploitabilité effective du graphe dans les builds réellement livrés et la disponibilité de mises à jour compatibles restent à confirmer.
 
 ## 10. Résultats/outils exécutés
 
 - Tree courant : migrations Alembic 0001 à 0006; 0005 déduplique `(driver_id, recorded_at)`, 0006 ajoute `vehicles.center_id` et contraintes uniques par centre. Application 0005/0006 **rapportée par le propriétaire**, non vérifiée par connexion DB.
-- `DEV_TASKS_ENABLED=false`, depuis `backend/`: exécution antérieure `pytest -q` → `160 passed, 1 warning in 18.63s`.
+- `DEV_TASKS_ENABLED` non défini, depuis `backend/`: `pytest -q` → **`165 passed, 1 warning in 12.96s`**; avertissement Starlette concernant `httpx` avec `TestClient`.
 - Tests d'intégration PostgreSQL : le propriétaire rapporte `3 passed`; non reproduits par l'auditeur. Test de restauration : le propriétaire rapporte `PASS` pour les cinq tables comparées par le script; non reproduit par l'auditeur.
 - Une tentative `npm audit` depuis la racine échoue faute de lockfile racine (`ENOLOCK`); depuis `DriverApp/`, `npm audit` → `54 vulnerabilities (5 moderate, 49 high)`.
 - `pip-audit` : commande indisponible.
 - Une première tentative `pytest` depuis la racine échoue à la collecte faute de résolution des modules backend; relancée depuis `backend/` dans les conditions ci-dessus, elle passe.
+- Frontend: **16 tests** Vitest (**15 existants + 1 nouveau test MapView**); mobile: **17 tests** Jest, trois exécutions complètes réussies (5 suites et 17 tests à chaque exécution).
 - Comportement réel de l'application sur téléphone : **UNVERIFIED**; aucun test device effectué par l'auditeur.
 - Compilation courante du rapport : deux passes `pdflatex -interaction=nonstopmode -halt-on-error`, code 0 chacune; détails, pages et avertissements dans `docs/report/README.md`.
 - Aucune connexion base, commande psql, lecture `.env`, mise à jour de dépendance ou modification applicative.

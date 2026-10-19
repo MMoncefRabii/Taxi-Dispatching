@@ -1,43 +1,41 @@
 # Technical Decisions
 
-## Location tracking library
-- What we chose: `react-native-geolocation-service` 5.3.1, using foreground `watchPosition` updates rather than a paid background-tracking SDK.
-- Why: Transistorsoft's `react-native-background-geolocation` offers more reliable long-running background tracking but requires a paid license; we are starting lean for the MVP and will revisit it if drivers report lost tracking during long background periods.
-- Known limitation: Tracking is currently foreground-only: iOS requests `whenInUse` authorization, Android requests fine and coarse location, and no background mode or foreground service is configured.
+## Location tracking
+- What we chose: `react-native-geolocation-service` for location updates and `react-native-background-actions` to run an Android location foreground service while the driver is online.
+- Why: The service lets Android continue tracking when the app is backgrounded, without adding a paid background-tracking SDK.
+- Known limitation: iOS tracking is foreground-only. The Android service and GPS behavior still require real-device verification.
 
-## Auth model
-- What we chose: One long-lived token per driver, created by the admin through the backend and pasted into the app on first launch; the app stores it in AsyncStorage and reuses it in requests.
-- Why: This avoids a driver-facing signup/login flow, password resets, and email verification, which is reasonable for a small pilot where the admin directly onboards drivers.
-- Known limitation: There is no expiry or refresh mechanism, and the backend currently has no driver-token deactivation endpoint, so revocation is not available through the implemented app/backend workflow.
+## Authentication
+- What we chose: One opaque token per driver, created by an admin and entered in the app. The app stores it in AsyncStorage and attaches it to API requests.
+- Why: Direct admin onboarding avoids a driver-facing signup, password-reset, or email-verification flow.
+- Known limitation: The token has no client-side expiry or refresh flow. An admin can revoke it by deactivating the driver or generating a replacement token; the app handles an unauthorized response by clearing its saved token.
 
 ## State management
-- What we chose: React's built-in `useState` and `useEffect`, with token state at the app/navigation root and screen-specific state kept inside each screen; no Redux, Zustand, or shared context is used.
+- What we chose: React's built-in `useState` and `useEffect`, with token state at the app/navigation root and screen-specific state kept inside each screen.
 - Why: The app has a small three-screen flow and limited shared state, so a dedicated state library would add complexity without a matching benefit at this size.
-- Known limitation: Online status is screen-local and is not restored from the backend when the app starts again.
 
 ## Networking
-- What we chose: `fetch()` through a small typed API client, with no Axios or React Query; the client adds the `x-token` header and handles JSON POSTs to the status and location endpoints.
-- Why: The current API surface is small, so this wrapper is sufficient without a larger networking or caching dependency; reconsider caching or retry tooling if endpoints and client-side data needs grow.
-- Known limitation: The API client has no general retry, request timeout, or caching layer, and converts network and non-2xx responses into `ApiError` instances.
+- What we chose: `fetch()` through a small typed API client, with no Axios or React Query. The client adds the `x-token` header, sends JSON requests, and aborts requests after 10 seconds.
+- Why: The current API surface is small, so this wrapper is sufficient without a larger networking or caching dependency.
 
 ## Navigation
-- What we chose: React Navigation 7 native stack (`@react-navigation/native` 7.5.0 and `@react-navigation/native-stack` 7.20.0) with TokenEntry, Main, and Settings routes.
-- Why: It is a standard React Native navigation option with TypeScript support and a minimal setup for the app's token-gated three-screen flow.
+- What we chose: React Navigation 7 native stack with TokenEntry, Main, and Settings routes.
+- Why: It provides a standard React Native navigation setup with TypeScript support for the app's token-gated flow.
 
 ## Unauthorized response handling
-- What we chose: The API client invokes a single unauthorized handler on HTTP 401, and the app registers that handler at the root to remove the saved token, show an invalid-driver-token alert, and return navigation to token entry.
-- Why: Centralizing this behavior means each endpoint caller gets consistent invalid-token handling without duplicating logout logic.
+- What we chose: The API client invokes a single unauthorized handler on HTTP 401. The app removes the saved token, notifies the driver, and returns navigation to token entry.
+- Why: Centralizing this behavior gives each endpoint caller consistent handling after admin-side token revocation.
 
 ## Location delivery and failures
-- What we chose: The tracker sends each watch callback to the location endpoint, skips callbacks while a send is already in flight, and resets its consecutive-failure counter after a successful HTTP response.
-- Why: Serializing sends avoids overlapping requests, while a warning after three consecutive failures gives the driver a visible sync signal without adding a queue or retry subsystem.
-- Known limitation: Failed points are dropped rather than queued or retried; a successful response with `ok: false` (for example, a low-accuracy point ignored by the backend) is not counted as a failure and does not update the displayed last-sent location.
+- What we chose: Location points are persisted in a bounded AsyncStorage queue with a cap of 1,000 entries and sent in batches of up to 50. Failed deliveries use increasing retry backoff. If a batch receives HTTP 422, the client bisects it recursively to isolate invalid points; rejected points are dropped while valid points can still be delivered.
+- Why: Persistence and retry protect queued points across temporary network failures, while bisection prevents one invalid point from blocking an entire batch.
+- Known limitation: The queue drops oldest points when it reaches its cap, and server-rejected points are not retried.
 
 ## Location permissions
-- What we chose: The app requests location permission only when the driver switches online; iOS asks for `whenInUse`, while Android requests fine and coarse permission and requires fine permission to be granted before going online.
-- Why: This avoids prompting before location tracking is needed and keeps the permission scope aligned with foreground-only sharing.
-- Known limitation: There is no background-location permission flow, and denied permission blocks the online transition until access is granted in system settings.
+- What we chose: The app requests location permission when the driver switches online. iOS requests `whenInUse`; Android requests fine and coarse location and requires fine permission.
+- Why: This avoids prompting before location tracking is needed and limits permission scope on iOS.
+- Known limitation: iOS background tracking is not implemented. Denied permissions block going online until the driver grants access in system settings.
 
 ## Backend URL configuration
-- What we chose: The backend URL defaults to `http://10.0.2.2:8000` and can be changed in Settings; the value is persisted in AsyncStorage separately from the driver token.
-- Why: The Android emulator can reach a host machine through `10.0.2.2`, and making the URL editable supports changing development or deployment targets without rebuilding the app.
+- What we chose: The backend URL defaults to `http://10.0.2.2:8000`, can be changed in Settings, and is persisted in AsyncStorage separately from the driver token.
+- Why: The Android emulator can reach the host machine through `10.0.2.2`, and an editable URL supports changing targets without rebuilding the app.

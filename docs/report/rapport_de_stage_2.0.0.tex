@@ -248,7 +248,7 @@ Le schéma logique ci-dessous est construit à partir des modèles et des migrat
 \begin{tikzpicture}[node distance=1.1cm and 1.45cm,>=Latex,
   ent/.style={draw,rounded corners,align=left,text width=3.5cm,minimum height=0.9cm,font=\scriptsize,fill=green!7},
   ref/.style={-{Latex},thick}]
-\node[ent] (center) {\textbf{centers}\\PK id; name, city, timezone};
+\node[ent] (center) {\textbf{centers}\\PK id; name, city, timezone; deactivated\_at non utilisée};
 \node[ent,right=of center] (admin) {\textbf{admins}\\PK id; FK center\_id; email, password\_hash};
 \node[ent,below=of admin] (as) {\textbf{admin\_sessions}\\PK id; FK admin\_id; token\_hash, expiry};
 \node[ent,below=of center] (driver) {\textbf{drivers}\\PK id; FK center\_id; token\_hash};
@@ -293,9 +293,12 @@ Positions & Historique, consultation de la plus récente, ingestion unitaire ou 
 Journaux admin et plateforme & Traces des actions prises en charge. & Réalisé partiellement selon opérations.\\
 Zones & Zone géographique liée à un centre. & Table présente, utilisation applicative non identifiée.\\
 Journaux de statut chauffeur & Historique prévu de changements online/offline. & Table présente, écriture non identifiée.\\
+Champs sans usage identifié & \texttt{centers.deactivated\_at}, \texttt{vehicles.active}, \texttt{vehicles.deactivated\_at}. & Présents au schéma; aucun usage applicatif identifié dans le code suivi.\\
 \bottomrule
 \end{longtable}
 \normalsize
+
+Les clés étrangères de \texttt{vehicles.center\_id} et \texttt{vehicles.driver\_id} sont indépendantes; le schéma ne comporte pas de contrainte composite garantissant que le véhicule et son chauffeur appartiennent au même centre. Ce point est une lacune de contrainte à examiner; aucune migration n'est incluse dans cette révision.
 
 \section{Pile technologique}
 
@@ -318,7 +321,7 @@ React Native / React & Application chauffeur & 0.87.1 et 19.2.3 fixes dans le ma
 TypeScript / navigation React Native & Types et navigation & TypeScript intervalle \texttt{\^6.0.3}; navigation \texttt{\^7.5.0}/\texttt{\^7.20.0}.\\
 react-native-geolocation-service & Lecture GPS foreground & \texttt{\^5.3.1}.\\
 AsyncStorage & Stockage app & \texttt{\^3.1.1}.\\
-HTML, CSS, JavaScript, Leaflet & Interface web cartographique et consoles & Leaflet 1.9.4 référencé par CDN; versions HTML/JS non applicables.\\
+React, TypeScript, Vite, Leaflet & Interface web cartographique et consoles & React 19.3.0; Leaflet 1.9.4; versions HTML/TS non applicables.\\
 pytest / httpx (développement) & Tests backend & pytest 8.4.2 et httpx 0.28.1 exacts dans \texttt{requirements-dev.txt}.\\
 \bottomrule
 \end{longtable}
@@ -342,9 +345,9 @@ Pas de limitation de débit, de MFA/TOTP ni de récupération de mot de passe; a
 
 \section{Tests et validation}
 
-La commande backend a été lancée lors de la vérification précédente depuis \texttt{backend} avec \path{DEV_TASKS_ENABLED=false}. Sortie observée : \texttt{160 passed, 1 warning in 18.63s}. L'avertissement signale une dépréciation liée à \texttt{httpx} avec Starlette \texttt{TestClient}. Les tests unitaires couvrent les modules d'authentification admin, tâches de développement, chauffeur simulé, invitations, positions et plateforme; plusieurs fixtures simulent les sessions SQLAlchemy. Le propriétaire rapporte séparément que les trois tests d'intégration PostgreSQL ont réussi; ce résultat n'a pas été reproduit ici. Il rapporte également l'application des migrations 0005/0006 et un PASS au test de restauration des cinq tables. Ces résultats sont donc des déclarations du propriétaire, pas des vérifications effectuées pour cette révision documentaire.
+Les tests backend comptent 165 cas; l'exécution avec \texttt{DEV\_TASKS\_ENABLED} non défini a produit \texttt{165 passed, 1 warning in 12.96s}. Les tests frontend comptent 16 cas Vitest, soit les 15 tests préexistants et le nouveau test de régression MapView. Les tests Jest mobiles comptent 17 cas; trois exécutions complètes ont chacune réussi avec 5 suites et 17 tests. L'unique avertissement backend signale la dépréciation de \texttt{httpx} avec Starlette \texttt{TestClient}. Les tests backend utilisent plusieurs doubles de base; aucun test de cette tâche n'accède à PostgreSQL. Le propriétaire rapporte séparément que les trois tests d'intégration PostgreSQL ont réussi; ce résultat n'a pas été reproduit ici. Il rapporte également l'application des migrations 0005/0006 et un PASS au test de restauration des cinq tables. Ces résultats sont des déclarations du propriétaire, pas des vérifications effectuées pour cette révision documentaire.
 
-Les tests Jest mobiles comptent 15 cas répartis sur cinq suites : application, client API, saisie de jeton, file et tracker. Le lancement complet a eu deux échecs de délai/mocks dans la suite TokenEntryScreen; relancée seule, cette suite a réussi 2/2. L'échec complet n'est donc pas qualifié de succès ni diagnostiqué comme résolu. Aucune validation GPS, permission, arrière-plan ou téléphone réel n'a été effectuée pour ce rapport; l'essai historique mentionné par le README n'a pas été reproduit.
+Aucun test GPS, permission, arrière-plan ou téléphone réel n'a été effectué pour ce rapport. Le résultat antérieurement annoncé dans le README n'est pas vérifié et y est explicitement marqué \textbf{non vérifié}.
 
 \section{Comparaison qualitative}
 
