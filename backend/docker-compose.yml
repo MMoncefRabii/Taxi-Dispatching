@@ -5,9 +5,9 @@ services:
     environment:
       POSTGRES_DB: fleet_tracker
       POSTGRES_USER: fleet_tracker
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fleet_tracker_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in backend/.env}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 

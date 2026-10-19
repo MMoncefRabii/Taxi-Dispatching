@@ -14,7 +14,7 @@ describe('TokenEntryScreen', () => {
     const onTokenSaved = jest.fn();
     let renderer: ReactTestRenderer.ReactTestRenderer;
 
-    await ReactTestRenderer.act(() => {
+    await ReactTestRenderer.act(async () => {
       renderer = ReactTestRenderer.create(
         <TokenEntryScreen onTokenSaved={onTokenSaved} />,
       );
@@ -24,11 +24,15 @@ describe('TokenEntryScreen', () => {
       accessibilityLabel: 'Driver token',
     });
 
-    await ReactTestRenderer.act(() => tokenInput.props.onChangeText('  driver-token  '));
+    await ReactTestRenderer.act(async () => {
+      tokenInput.props.onChangeText('  driver-token  ');
+    });
     const saveButton = renderer!.root.findByProps({
       accessibilityRole: 'button',
     });
-    await ReactTestRenderer.act(() => saveButton.props.onPress());
+    await ReactTestRenderer.act(async () => {
+      await saveButton.props.onPress();
+    });
 
     expect(mockedStorage.setItem).toHaveBeenCalledWith(
       'driver_token',
@@ -41,7 +45,7 @@ describe('TokenEntryScreen', () => {
     const onTokenSaved = jest.fn();
     let renderer: ReactTestRenderer.ReactTestRenderer;
 
-    await ReactTestRenderer.act(() => {
+    await ReactTestRenderer.act(async () => {
       renderer = ReactTestRenderer.create(
         <TokenEntryScreen onTokenSaved={onTokenSaved} />,
       );
@@ -50,11 +54,15 @@ describe('TokenEntryScreen', () => {
     const tokenInput = renderer!.root.findByProps({
       accessibilityLabel: 'Driver token',
     });
-    await ReactTestRenderer.act(() => tokenInput.props.onChangeText('   '));
+    await ReactTestRenderer.act(async () => {
+      tokenInput.props.onChangeText('   ');
+    });
     const saveButton = renderer!.root.findByProps({
       accessibilityRole: 'button',
     });
-    await ReactTestRenderer.act(() => saveButton.props.onPress());
+    await ReactTestRenderer.act(async () => {
+      await saveButton.props.onPress();
+    });
 
     expect(mockedStorage.setItem).not.toHaveBeenCalled();
     expect(onTokenSaved).not.toHaveBeenCalled();

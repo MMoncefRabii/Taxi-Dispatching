@@ -295,7 +295,14 @@ async def lifespan(application: FastAPI):
 
 
 def create_app() -> FastAPI:
-    application = FastAPI(title="Fleet Tracker", lifespan=lifespan)
+    docs_enabled = settings.app_env == "development"
+    application = FastAPI(
+        title="Fleet Tracker",
+        lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
     application.add_middleware(
         LocationBatchBodyLimitMiddleware,
         max_body_bytes=LOCATION_BATCH_BODY_MAX_BYTES,

@@ -115,6 +115,7 @@ export function MapView({
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
   const onSelectRef = useRef(onSelect);
+  const hasFittedInitialDriversRef = useRef(false);
 
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -144,6 +145,7 @@ export function MapView({
       map.removeLayer(markerLayer);
       map.remove();
       mapRef.current = null;
+      hasFittedInitialDriversRef.current = false;
     };
   }, [onMapReady]);
 
@@ -184,7 +186,10 @@ export function MapView({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (map) fitDrivers(map, drivers);
+    if (map && drivers.length > 0 && !hasFittedInitialDriversRef.current) {
+      fitDrivers(map, drivers);
+      hasFittedInitialDriversRef.current = true;
+    }
   }, [drivers]);
 
   useEffect(() => {

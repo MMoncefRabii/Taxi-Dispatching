@@ -5,9 +5,11 @@ This setup is for local development only. Do not use local database credentials 
 ## PostgreSQL configuration
 
 - Database: `fleet_tracker`
-- Host port: `5432`
+- Host binding: `127.0.0.1:5432`
 
-Copy `.env.example` to `backend/.env` and replace `<password>` and `<user>` with local values before starting PostgreSQL or the backend. The current Compose configuration fixes the PostgreSQL user, so use that configured user in `DATABASE_URL`; URL-encode reserved characters in the password. Keep `backend/.env` local and out of version control.
+Copy `.env.example` to `backend/.env` and replace `<password>` in `POSTGRES_PASSWORD` and `DATABASE_URL` before starting PostgreSQL or the backend. The Compose service requires `POSTGRES_PASSWORD`; it has no default. The current Compose configuration fixes the PostgreSQL user to `fleet_tracker`, so use that user in `DATABASE_URL`; URL-encode reserved characters in the URL password. Keep `backend/.env` local and out of version control.
+
+PostgreSQL applies `POSTGRES_PASSWORD` only when it initializes an empty `postgres_data` volume. Changing the value in `.env` does not change the password stored in an existing volume and can prevent the application from connecting. For an existing volume, keep `POSTGRES_PASSWORD` and `DATABASE_URL` set to its current database password. A password rotation requires changing the PostgreSQL role password in the existing database first, then updating both environment values; do not remove or recreate the volume to apply a new password.
 
 ## Admin authentication settings
 
@@ -52,7 +54,7 @@ Run the fake driver simulator from `backend/` with `python fake_driver.py`. It r
 
 The default-center seed creates a center only when none exists. `WEB_ORIGINS` is a comma-separated allowlist used by the API for the separate admin frontend; for the default local frontend, set it to `http://localhost:5173`.
 
-Keep the backend command running in that terminal. The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs). The independent web frontend is served separately from the repository's `frontend/` directory; follow the frontend instructions in the root README.
+Keep the backend command running in that terminal. In development, the API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs). `/docs`, `/redoc`, and `/openapi.json` are disabled in production. The independent web frontend is served separately from the repository's `frontend/` directory; follow the frontend instructions in the root README.
 
 The platform console can expose the allowlisted local development tasks when `DEV_TASKS_ENABLED=true` and `APP_ENV=development`. This is disabled by default, is refused in production, and starts no backend process. Use it only for local development; see the frontend README for the available console tasks.
 
