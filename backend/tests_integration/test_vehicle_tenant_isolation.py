@@ -6,6 +6,7 @@ from typing import Protocol, TypedDict
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import pytest
 
@@ -94,6 +95,17 @@ async def _driver_and_vehicle_centers(
         return result.one()
 
 
+async def _vehicle_plate_number(
+    database: IntegrationDatabase,
+    driver_id: uuid.UUID,
+) -> str:
+    async with database.session_factory() as session:
+        result = await session.execute(
+            select(Vehicle.plate_number).where(Vehicle.driver_id == driver_id)
+        )
+        return result.scalar_one()
+
+
 @pytest.fixture
 def admin_pair(integration_database: IntegrationDatabase) -> AdminPair:
     return asyncio.run(_create_admin_pair(integration_database))
@@ -120,6 +132,52 @@ def _login(client: TestClient, admin: CenterAdmin) -> None:
         json={"email": admin.email, "password": admin.password},
     )
     assert response.status_code == 200
+
+
+async def _verify_vehicle_driver_center_constraint(
+    database: IntegrationDatabase,
+) -> None:
+    async with database.session_factory() as session:
+        center_a = Center(name=f"Constraint A {uuid.uuid4()}", city="Test")
+        center_b = Center(name=f"Constraint B {uuid.uuid4()}", city="Test")
+        session.add_all([center_a, center_b])
+        await session.flush()
+        driver = Driver(
+            center_id=center_a.id,
+            name="Constraint driver",
+            phone="55500005",
+            token_hash=f"constraint-{uuid.uuid4()}",
+        )
+        session.add(driver)
+        await session.commit()
+
+    async with database.session_factory() as session:
+        mismatched_vehicle = Vehicle(
+            center_id=center_b.id,
+            driver_id=driver.id,
+            taxi_number=f"MISMATCH-{uuid.uuid4()}",
+            plate_number=f"MISMATCH-{uuid.uuid4()}",
+        )
+        session.add(mismatched_vehicle)
+        with pytest.raises(IntegrityError):
+            await session.flush()
+        await session.rollback()
+
+        matching_vehicle = Vehicle(
+            center_id=center_a.id,
+            driver_id=driver.id,
+            taxi_number=f"MATCH-{uuid.uuid4()}",
+            plate_number=f"MATCH-{uuid.uuid4()}",
+        )
+        session.add(matching_vehicle)
+        await session.commit()
+        assert await session.get(Vehicle, matching_vehicle.id) is not None
+
+
+def test_database_requires_vehicle_and_driver_to_share_center(
+    integration_database: IntegrationDatabase,
+):
+    asyncio.run(_verify_vehicle_driver_center_constraint(integration_database))
 
 
 def _create_driver(
@@ -177,6 +235,10 @@ def test_vehicle_numbers_are_unique_within_center_only(
         taxi_number="PATCH-TAXI",
         plate_number="PATCH-PLATE",
     )
+    valid_patch = api_client.patch(
+        f"/admin/drivers/{patch_target['id']}",
+        json={"vehicle": {"plate_number": "PATCHED-PLATE"}},
+    )
     duplicate_taxi = api_client.post(
         "/admin/drivers",
         json={
@@ -204,6 +266,13 @@ def test_vehicle_numbers_are_unique_within_center_only(
         json={"vehicle": {"taxi_number": "SHARED-TAXI"}},
     )
 
+    assert valid_patch.status_code == 200, valid_patch.text
+    assert asyncio.run(
+        _vehicle_plate_number(
+            integration_database,
+            uuid.UUID(patch_target["id"]),
+        )
+    ) == "PATCHED-PLATE"
     assert duplicate_taxi.status_code == 409
     assert duplicate_taxi.json()["detail"] == CONFLICT_DETAIL
     assert duplicate_plate.status_code == 409

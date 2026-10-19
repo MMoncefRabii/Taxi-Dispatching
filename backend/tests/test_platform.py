@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 import main
+import scripts.reset_super_admin as reset_super_admin_script
 import scripts.seed_super_admin as seed_super_admin_script
 from app.db import get_db
 from app.models import (
@@ -516,3 +517,80 @@ def test_seed_script_does_not_prompt_after_first_super_admin(monkeypatch, capsys
         "super admin.\n"
     )
     seed_super_admin_script.getpass.assert_not_called()
+
+
+def test_reset_super_admin_changes_password_revokes_sessions_and_audits(monkeypatch):
+    super_admin = make_super_admin()
+    session = Mock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+    transaction = Mock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=None)
+    session.begin = Mock(return_value=transaction)
+    session.execute = AsyncMock(
+        side_effect=[scalar_result(super_admin), Mock()]
+    )
+    session.add = Mock()
+    monkeypatch.setattr(reset_super_admin_script, "SessionLocal", lambda: session)
+
+    changed = asyncio.run(
+        reset_super_admin_script.reset_super_admin(
+            " OWNER@example.com ",
+            "a-new-password-that-is-long-enough",
+        )
+    )
+
+    assert changed is True
+    assert PasswordHasher().verify(
+        super_admin.password_hash,
+        "a-new-password-that-is-long-enough",
+    )
+    assert session.execute.await_count == 2
+    reset_statement = session.execute.await_args_list[1].args[0]
+    assert reset_statement.compile().params["revoked_at"] is not None
+    audit_event = session.add.call_args.args[0]
+    assert isinstance(audit_event, PlatformAuditLog)
+    assert audit_event.action == "password_reset"
+    assert audit_event.target_id == super_admin.id
+
+
+def test_reset_super_admin_does_not_change_an_unknown_account(monkeypatch):
+    session = Mock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+    transaction = Mock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=None)
+    session.begin = Mock(return_value=transaction)
+    session.execute = AsyncMock(return_value=scalar_result())
+    session.add = Mock()
+    monkeypatch.setattr(reset_super_admin_script, "SessionLocal", lambda: session)
+
+    changed = asyncio.run(
+        reset_super_admin_script.reset_super_admin(
+            "missing@example.com",
+            "a-new-password-that-is-long-enough",
+        )
+    )
+
+    assert changed is False
+    assert session.execute.await_count == 1
+    session.add.assert_not_called()
+
+
+def test_reset_prompt_rejects_mismatched_passwords(monkeypatch):
+    monkeypatch.setattr(
+        reset_super_admin_script.getpass,
+        "getpass",
+        Mock(side_effect=["first-password-long-enough", "different-password"]),
+    )
+    dispose = AsyncMock()
+    monkeypatch.setattr(reset_super_admin_script, "engine", Mock(dispose=dispose))
+
+    with pytest.raises(reset_super_admin_script.PasswordInputError):
+        asyncio.run(
+            reset_super_admin_script.reset_from_prompt("owner@example.com")
+        )
+
+    dispose.assert_awaited_once()

@@ -127,11 +127,11 @@ def integration_database() -> Iterator[IntegrationDatabase]:
         )
         database_created = True
         run_alembic("upgrade", "head")
-        run_alembic("downgrade", "0005_location_dedup")
+        run_alembic("downgrade", "0006_vehicle_tenant_uniqueness")
         run_alembic("upgrade", "head")
         current = run_alembic("current")
-        if "0006_vehicle_tenant_uniqueness" not in current:
-            raise RuntimeError("Alembic did not leave fleet_integration_test at revision 0006.")
+        if "0007_vehicle_driver_center_fk" not in current:
+            raise RuntimeError("Alembic did not leave fleet_integration_test at revision 0007.")
 
         engine = create_async_engine(test_url, poolclass=NullPool)
         yield IntegrationDatabase(
