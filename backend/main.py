@@ -26,7 +26,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, with_loader_criteria
@@ -294,6 +294,24 @@ async def lifespan(application: FastAPI):
             await engine.dispose()
 
 
+async def _health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+async def _ready(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str] | JSONResponse:
+    try:
+        await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=2)
+    except (SQLAlchemyError, TimeoutError):
+        logging.getLogger(__name__).warning("Database readiness probe failed.")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready"},
+        )
+    return {"status": "ready"}
+
+
 def create_app() -> FastAPI:
     docs_enabled = settings.app_env == "development"
     application = FastAPI(
@@ -302,6 +320,13 @@ def create_app() -> FastAPI:
         docs_url="/docs" if docs_enabled else None,
         redoc_url="/redoc" if docs_enabled else None,
         openapi_url="/openapi.json" if docs_enabled else None,
+    )
+    application.add_api_route("/health", _health, methods=["GET"])
+    application.add_api_route(
+        "/ready",
+        _ready,
+        methods=["GET"],
+        response_model=None,
     )
     application.add_middleware(
         LocationBatchBodyLimitMiddleware,
