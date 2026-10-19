@@ -4,7 +4,20 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint, func, true
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    true,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -175,6 +188,9 @@ class AuditLog(Base):
 
 class Driver(Base):
     __tablename__ = "drivers"
+    __table_args__ = (
+        UniqueConstraint("id", "center_id", name="uq_drivers_id_center_id"),
+    )
     id: Mapped[uuid.UUID] = uuid_pk()
     center_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("centers.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -203,12 +219,18 @@ class Vehicle(Base):
             "plate_number",
             name="uq_vehicles_center_plate_number",
         ),
+        ForeignKeyConstraint(
+            ["driver_id", "center_id"],
+            ["drivers.id", "drivers.center_id"],
+            name="fk_vehicles_driver_center_drivers",
+            match="SIMPLE",
+        ),
     )
     id: Mapped[uuid.UUID] = uuid_pk()
     center_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("centers.id"), nullable=False, index=True
     )
-    driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False, unique=True, index=True)
+    driver_id: Mapped[uuid.UUID] = mapped_column(nullable=False, unique=True, index=True)
     taxi_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     plate_number: Mapped[str] = mapped_column(String(50), nullable=False)
     type: Mapped[str | None] = mapped_column(String(50), nullable=True)

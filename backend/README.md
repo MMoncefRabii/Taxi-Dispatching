@@ -42,6 +42,14 @@ python -m scripts.seed_super_admin --email owner@example.com
 
 This hidden-prompt seed command is only for creating the first platform-owner super admin. It refuses to prompt if any super admin already exists; it is not a command for adding later owner accounts.
 
+Reset an existing platform-owner password from `backend/` with:
+
+```powershell
+python -m scripts.reset_super_admin --email owner@example.com
+```
+
+The command prompts for the new password twice without displaying it, requires 12 to 128 characters, updates only the matching existing account, revokes its platform sessions, and records the reset in the platform audit log. It does not create an account or change its active status.
+
 Deactivate an admin from `backend/` with:
 
 ```powershell
