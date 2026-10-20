@@ -13,6 +13,7 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY --chown=app:app main.py alembic.ini ./
 COPY --chown=app:app alembic ./alembic
 COPY --chown=app:app app ./app
+COPY --chown=app:app scripts/bootstrap_platform_owner.py ./scripts/
 
 USER app
 
