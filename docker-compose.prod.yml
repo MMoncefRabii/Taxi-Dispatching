@@ -1,0 +1,60 @@
+x-backend-image: &backend-image fleet-tracker-backend:local
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER in .env.prod}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}"
+      POSTGRES_DB: "${POSTGRES_DB:?Set POSTGRES_DB in .env.prod}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  migrate:
+    image: *backend-image
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: "${DATABASE_URL:?Set DATABASE_URL in .env.prod}"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    image: *backend-image
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      DATABASE_URL: "${DATABASE_URL:?Set DATABASE_URL in .env.prod}"
+      WEB_ORIGINS: "${WEB_ORIGINS:?Set WEB_ORIGINS in .env.prod}"
+      FRONTEND_BASE_URL: "${FRONTEND_BASE_URL:?Set FRONTEND_BASE_URL in .env.prod}"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  postgres_data:

@@ -11,6 +11,7 @@ backups/
 .env
 .env.*
 !.env.example
+!.env.prod.example
 
 # JavaScript dependencies and generated output
 node_modules/
