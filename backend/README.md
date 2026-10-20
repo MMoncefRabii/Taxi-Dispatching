@@ -2,6 +2,40 @@
 
 This setup is for local development only. Do not use local database credentials in production.
 
+## Linux Docker deployment
+
+From the repository root, copy `.env.prod.example` to `.env.prod`, replace the placeholders, and keep the file private. `POSTGRES_USER`, `POSTGRES_DB`, and `POSTGRES_PASSWORD` configure PostgreSQL; `DATABASE_URL` must use the same values and point to host `db`, port `5432`, with the `postgresql+asyncpg` driver. URL-encode reserved characters in the URL password. The backend requirements are still partly unpinned; a lockfile is planned for a follow-up branch.
+
+Build the backend image and start the services:
+
+```sh
+cp .env.prod.example .env.prod
+docker compose --env-file .env.prod -f docker-compose.prod.yml build
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+```
+
+The one-shot migration service applies migrations before the API starts; migrations do not run when the API starts. Check readiness at `http://127.0.0.1:8000/ready` (and liveness at `/health`), and view API logs with:
+
+```sh
+curl --fail http://127.0.0.1:8000/ready
+docker compose --env-file .env.prod -f docker-compose.prod.yml logs -f api
+```
+
+Run or roll back one migration explicitly with:
+
+```sh
+docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm migrate alembic upgrade head
+docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm migrate alembic downgrade -1
+```
+
+Stop the services without deleting the database volume:
+
+```sh
+docker compose --env-file .env.prod -f docker-compose.prod.yml down
+```
+
+The API is published only on `127.0.0.1:8000`; a reverse proxy is not included yet. Run a single API instance: WebSocket broadcasts are process-local, so multiple workers or replicas will not share broadcasts. Existing database backup and restore scripts are Windows PowerShell-only; a Linux backup task is planned for a later branch.
+
 ## PostgreSQL configuration
 
 - Database: `fleet_tracker`
