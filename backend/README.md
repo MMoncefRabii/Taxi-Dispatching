@@ -76,6 +76,28 @@ python -m scripts.seed_super_admin --email owner@example.com
 
 This hidden-prompt seed command is only for creating the first platform-owner super admin. It refuses to prompt if any super admin already exists; it is not a command for adding later owner accounts.
 
+For a containerized production deployment, bootstrap the first platform owner
+from the repository root after the services are ready:
+
+```sh
+docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm -it api python -m scripts.bootstrap_platform_owner
+```
+
+The command prompts for the email and asks for the password twice using hidden
+input. It validates passwords with the existing 12–128 character rule and
+stores an Argon2 hash. Re-running for an existing email makes no change; it
+will not create another owner if a different platform owner already exists.
+For a non-interactive invocation, `--email` can provide the email and
+`PLATFORM_OWNER_BOOTSTRAP_PASSWORD` can provide the password in the environment
+for that command only; never place the password in the command arguments or a
+file.
+`--reset` can reset the matching existing owner's password only after a
+separate email confirmation; it also revokes that owner's active platform
+sessions and records the reset in the platform audit log. The command requires
+`APP_ENV=production` unless `--allow-dev` is explicitly supplied. It does not
+record an audit event for initial owner creation because the platform console
+does not normally audit owner creation.
+
 Reset an existing platform-owner password from `backend/` with:
 
 ```powershell
