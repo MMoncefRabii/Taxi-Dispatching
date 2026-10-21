@@ -5,7 +5,10 @@ import pytest
 
 os.environ.update(
     {
-        "DATABASE_URL": "postgresql+asyncpg://localhost/test_db",
+        "DATABASE_URL": (
+            "postgresql+asyncpg://test_user:"
+            "unit-test-only-not-secret@localhost/test_db"
+        ),
         "WEB_ORIGINS": "http://localhost:5173",
         "FRONTEND_BASE_URL": "http://localhost:5173",
         "DEV_TASKS_ENABLED": "false",
