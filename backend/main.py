@@ -41,7 +41,7 @@ from app.admin_management import (
     SelfDeactivationError,
     deactivate_admin_in_transaction,
 )
-from app.config import settings
+from app.config import Settings, settings
 from app.db import engine, get_db
 from app.locations import (
     LocationLimits,
@@ -273,13 +273,9 @@ class LocationBatchBodyLimitMiddleware:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    _validate_startup_configuration(settings)
     task_manager = None
     if settings.dev_tasks_enabled:
-        logging.getLogger(__name__).warning(
-            "DEV_TASKS_ENABLED is on; development task controls are available."
-        )
-        if settings.app_env == "production":
-            raise RuntimeError("DEV_TASKS_ENABLED cannot be used in production.")
         from app.platform.devtasks.runner import DevTaskManager
 
         task_manager = DevTaskManager()
@@ -292,6 +288,29 @@ async def lifespan(application: FastAPI):
                 await task_manager.shutdown()
         finally:
             await engine.dispose()
+
+
+def _validate_startup_configuration(configuration: Settings) -> None:
+    logger = logging.getLogger(__name__)
+    problems = configuration.production_configuration_problems()
+    if configuration.app_env == "production" and configuration.uses_localhost_http():
+        logger.warning(
+            "Production configuration uses HTTP on localhost; production traffic must use HTTPS."
+        )
+
+    if configuration.app_env == "production" and problems:
+        raise RuntimeError(
+            "Production configuration guard failed: " + " ".join(problems)
+        )
+    if configuration.app_env == "development" and problems:
+        logger.warning(
+            "Development configuration does not meet production requirements: %s",
+            " ".join(problems),
+        )
+    logger.info(
+        "Configuration guard passed for APP_ENV=%s.",
+        configuration.app_env,
+    )
 
 
 async def _health() -> dict[str, str]:

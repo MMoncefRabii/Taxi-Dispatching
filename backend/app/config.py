@@ -1,11 +1,37 @@
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, unquote, urlsplit
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+PLACEHOLDER_DATABASE_PASSWORDS = {
+    "admin",
+    "changeme",
+    "change_me",
+    "change-me",
+    "default",
+    "example",
+    "password",
+    "password1",
+    "placeholder",
+    "postgres",
+    "replace_with_a_long_random_password",
+    "root",
+    "secret",
+    "123456",
+    "12345678",
+}
+
+
+def _parse_url(value: str) -> SplitResult | None:
+    try:
+        parsed = urlsplit(value)
+        parsed.port
+    except ValueError:
+        return None
+    return parsed
 
 
 class Settings(BaseSettings):
@@ -112,6 +138,88 @@ class Settings(BaseSettings):
             for origin in self.web_origins.split(",")
             if origin.strip()
         ]
+
+    def production_configuration_problems(self) -> list[str]:
+        problems = []
+        if "web_origins" not in self.model_fields_set:
+            problems.append("WEB_ORIGINS must be explicitly set in production.")
+        if "frontend_base_url" not in self.model_fields_set:
+            problems.append("FRONTEND_BASE_URL must be explicitly set in production.")
+
+        origins = self.web_origins.split(",")
+        for index, raw_origin in enumerate(origins, start=1):
+            origin = raw_origin.strip()
+            if not origin:
+                problems.append(f"WEB_ORIGINS entry {index} must not be empty.")
+                continue
+            if "*" in origin:
+                problems.append("WEB_ORIGINS must not contain a wildcard origin.")
+                continue
+
+            parsed = _parse_url(origin)
+            if parsed is None:
+                problems.append(
+                    f"WEB_ORIGINS entry {index} must be a bare scheme://host[:port] origin with no path."
+                )
+                continue
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.netloc
+                or parsed.hostname is None
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+                or any(character.isspace() for character in origin)
+                or "?" in origin
+                or "#" in origin
+                or parsed.username is not None
+                or parsed.password is not None
+            ):
+                problems.append(
+                    f"WEB_ORIGINS entry {index} must be a bare scheme://host[:port] origin with no path."
+                )
+            if (
+                parsed.scheme != "https"
+                and parsed.hostname not in {"localhost", "127.0.0.1"}
+            ):
+                problems.append(
+                    f"WEB_ORIGINS entry {index} must use HTTPS unless its host is localhost or 127.0.0.1."
+                )
+
+        base_url = _parse_url(self.frontend_base_url)
+        if (
+            base_url is not None
+            and base_url.scheme != "https"
+            and base_url.hostname not in {"localhost", "127.0.0.1"}
+        ):
+            problems.append(
+                "FRONTEND_BASE_URL must use HTTPS unless its host is localhost or 127.0.0.1."
+            )
+
+        database_url = _parse_url(self.database_url)
+        if database_url is not None and database_url.scheme.startswith("postgres"):
+            password = unquote(database_url.password or "").strip().casefold()
+            if password in PLACEHOLDER_DATABASE_PASSWORDS or not password:
+                problems.append(
+                    "DATABASE_URL password looks like a placeholder."
+                )
+
+        if self.dev_tasks_enabled:
+            problems.append("DEV_TASKS_ENABLED cannot be used in production.")
+
+        return problems
+
+    def uses_localhost_http(self) -> bool:
+        urls = [*self.web_origins.split(","), self.frontend_base_url]
+        for value in urls:
+            parsed = _parse_url(value.strip())
+            if (
+                parsed is not None
+                and parsed.scheme == "http"
+                and parsed.hostname in {"localhost", "127.0.0.1"}
+            ):
+                return True
+        return False
 
     @property
     def async_database_url(self) -> str:
