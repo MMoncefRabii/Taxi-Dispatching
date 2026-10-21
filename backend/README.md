@@ -4,7 +4,28 @@ This setup is for local development only. Do not use local database credentials 
 
 ## Linux Docker deployment
 
-From the repository root, copy `.env.prod.example` to `.env.prod`, replace the placeholders, and keep the file private. `POSTGRES_USER`, `POSTGRES_DB`, and `POSTGRES_PASSWORD` configure PostgreSQL; `DATABASE_URL` must use the same values and point to host `db`, port `5432`, with the `postgresql+asyncpg` driver. URL-encode reserved characters in the URL password. The backend requirements are still partly unpinned; a lockfile is planned for a follow-up branch.
+The backend targets Python 3.13, recorded in the repository-root `.python-version`. `requirements.in` and `requirements-dev.in` contain direct dependencies; their compiled `.txt` files pin the full dependency trees, including pip where pip-audit requires it. Hashes are omitted because pip-tools stalled while hashing the full multi-platform artifact set and PyPI requests timed out. Starlette's `TestClient` uses `httpx2`; the old `httpx` pin is not needed.
+
+To update the locks, create a temporary tooling environment outside the repository. From the repository root in PowerShell:
+
+```powershell
+$tools = Join-Path $env:TEMP ("fleet-lock-tools-" + [guid]::NewGuid().ToString("N"))
+py -3.13 -m venv $tools
+& "$tools\Scripts\python.exe" -m pip install pip-tools
+Set-Location .\backend
+& "$tools\Scripts\pip-compile.exe" --upgrade --allow-unsafe --no-strip-extras --output-file=requirements.txt requirements.in
+& "$tools\Scripts\pip-compile.exe" --upgrade --allow-unsafe --no-strip-extras --output-file=requirements-dev.txt requirements-dev.in
+Remove-Item -LiteralPath $tools -Recurse -Force
+```
+
+Use `--upgrade-package <name>` instead of `--upgrade` to refresh a single package; when refreshing a runtime package, compile both locks. The development lock includes pip-audit. Run the audit from `backend/` with:
+
+```powershell
+pip-audit -r requirements.txt
+pip-audit -r requirements-dev.txt
+```
+
+From the repository root, copy `.env.prod.example` to `.env.prod`, replace the placeholders, and keep the file private. `POSTGRES_USER`, `POSTGRES_DB`, and `POSTGRES_PASSWORD` configure PostgreSQL; `DATABASE_URL` must use the same values and point to host `db`, port `5432`, with the `postgresql+asyncpg` driver. URL-encode reserved characters in the URL password.
 
 Build the backend image and start the services:
 
