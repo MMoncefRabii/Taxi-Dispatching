@@ -38,8 +38,6 @@ services:
       DATABASE_URL: "${DATABASE_URL:?Set DATABASE_URL in .env.prod}"
       WEB_ORIGINS: "${WEB_ORIGINS:?Set WEB_ORIGINS in .env.prod}"
       FRONTEND_BASE_URL: "${FRONTEND_BASE_URL:?Set FRONTEND_BASE_URL in .env.prod}"
-    ports:
-      - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -54,6 +52,33 @@ services:
       interval: 30s
       timeout: 5s
       start_period: 20s
+      retries: 3
+
+  proxy:
+    image: fleet-tracker-dashboard:local
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    restart: unless-stopped
+    environment:
+      CADDY_SITE: "${CADDY_SITE:-http://localhost:8080}"
+    ports:
+      - "127.0.0.1:8080:8080"
+      # For a public domain, replace the localhost mapping with:
+      # - "80:80"
+      # - "443:443"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -q -O /dev/null http://127.0.0.1:2019/config/"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
       retries: 3
 
 volumes:

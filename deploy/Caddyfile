@@ -1,0 +1,42 @@
+{$CADDY_SITE:http://localhost:8080} {
+	@https expression `{http.request.scheme} == "https"`
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		Content-Security-Policy-Report-Only "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.tile.openstreetmap.org data:; connect-src 'self' ws://{http.request.host} wss://{http.request.host}"
+	}
+
+	header @https Strict-Transport-Security "max-age=31536000"
+
+	@api path /admin/* /platform/* /invitations/* /location /location/* /status /ws /health /ready
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	handle / {
+		root * /srv
+		rewrite * /index.html
+		file_server
+	}
+
+	handle /platform.html {
+		root * /srv
+		file_server
+	}
+
+	handle /invite.html {
+		root * /srv
+		file_server
+	}
+
+	handle /assets/* {
+		root * /srv
+		file_server
+	}
+
+	handle {
+		respond "Not Found" 404
+	}
+}

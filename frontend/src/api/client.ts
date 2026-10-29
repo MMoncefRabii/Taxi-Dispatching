@@ -1,10 +1,19 @@
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
-export const API_BASE_URL = configuredApiBase || "http://localhost:8000";
+const apiBase = configuredApiBase ?? "http://localhost:8000";
+const isRelativeApiBase = apiBase.startsWith("/");
 
-const parsedApiBase = new URL(API_BASE_URL);
+if (
+  (isRelativeApiBase && apiBase.startsWith("//"))
+  || (apiBase !== "" && !isRelativeApiBase && !/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase))
+) {
+  throw new Error("VITE_API_BASE_URL must be absolute or an origin-relative path.");
+}
+
+const parsedApiBase = new URL(apiBase || window.location.origin, window.location.origin);
 if (parsedApiBase.protocol !== "http:" && parsedApiBase.protocol !== "https:") {
   throw new Error("VITE_API_BASE_URL must use HTTP or HTTPS.");
 }
+export const API_BASE_URL = parsedApiBase.href.replace(/\/+$/, "");
 
 export class ApiError extends Error {
   readonly status: number;
@@ -17,7 +26,7 @@ export class ApiError extends Error {
 }
 
 export function apiUrl(path: string): URL {
-  return new URL(path, `${API_BASE_URL.replace(/\/+$/, "")}/`);
+  return new URL(path.replace(/^\/+/, ""), `${API_BASE_URL}/`);
 }
 
 function readErrorMessage(payload: unknown, status: number): string {
