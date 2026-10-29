@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { API_BASE_URL } from "./client";
+import { apiUrl } from "./client";
 import type { FleetEvent } from "./types";
 
 const INITIAL_RECONNECT_DELAY_MS = 1_000;
@@ -7,6 +7,12 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
 
 export function nextReconnectDelay(attempt: number): number {
   return Math.min(INITIAL_RECONNECT_DELAY_MS * 2 ** attempt, MAX_RECONNECT_DELAY_MS);
+}
+
+export function fleetWebSocketUrl(): URL {
+  const socketUrl = apiUrl("/ws");
+  socketUrl.protocol = socketUrl.protocol === "https:" ? "wss:" : "ws:";
+  return socketUrl;
 }
 
 interface WebSocketHandlers {
@@ -73,10 +79,8 @@ export function useFleetWebSocket(
 
     const connect = () => {
       if (stopped) return;
-      const socketUrl = new URL("/ws", API_BASE_URL);
-      socketUrl.protocol = socketUrl.protocol === "https:" ? "wss:" : "ws:";
       try {
-        socket = new WebSocket(socketUrl);
+        socket = new WebSocket(fleetWebSocketUrl());
       } catch {
         handlersRef.current.onDisconnected();
         scheduleReconnect();
