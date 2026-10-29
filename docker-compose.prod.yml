@@ -65,7 +65,7 @@ services:
     environment:
       CADDY_SITE: "${CADDY_SITE:-http://localhost:8080}"
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${PROXY_PORT:-8080}:8080"
       # For a public domain, replace the localhost mapping with:
       # - "80:80"
       # - "443:443"

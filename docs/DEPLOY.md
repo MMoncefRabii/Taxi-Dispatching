@@ -8,12 +8,18 @@ origin. The API container and database are not published to the host.
 Copy `.env.prod.example` to `.env.prod`, replace the database password and
 matching `DATABASE_URL` password with a unique value, then start the stack:
 
+`PROXY_PORT` controls the host-side proxy port and defaults to `8080`; the
+proxy still listens on `8080` inside its container. Set `WEB_ORIGINS` and
+`FRONTEND_BASE_URL` to the browser origin using the same host port. For example,
+with `PROXY_PORT=18080`, set both to `http://localhost:18080` and open
+`http://localhost:18080/`. Keep `CADDY_SITE` on the container's port 8080.
+
 ```powershell
 docker compose --env-file .env.prod -f docker-compose.prod.yml -p fleet-proxy up -d --build
 ```
 
-Open `http://localhost:8080/`. The platform console and invitation page are
-available at `/platform.html` and `/invite.html`. Caddy proxies API paths
+The platform console and invitation page are available at `/platform.html` and
+`/invite.html`. Caddy proxies API paths
 directly without a prefix: `/admin/*`, `/platform/*`, `/invitations/*`,
 `/location`, `/location/*`, `/status`, `/ws`, `/health`, and `/ready`.
 Extensionless `/platform` and `/invite` paths and other unknown paths return
@@ -23,18 +29,31 @@ warning.
 The image build sets `VITE_API_BASE_URL` to an empty string, meaning the
 dashboard uses same-origin API requests and derives its WebSocket URL from the
 page origin. If the variable is undefined, local development retains the
-`http://localhost:8000` API default. Production session cookies include
-`Secure`; browsers treat `localhost` as an exception and allow Secure cookies
-over HTTP there. Do not rely on that exception for LAN addresses or public HTTP.
+`http://localhost:8000` API default. Admin and platform session cookies are
+`Secure` in production. Open the dashboard on the PC at
+`http://localhost:<PROXY_PORT>` (browsers treat `localhost` as secure) or over
+HTTPS; do not rely on the localhost exception for LAN addresses or public HTTP.
+Driver apps send the `x-token` header and are not affected by the cookie
+restriction.
 
-Set the mobile app backend base URL to `http://10.0.2.2:8080` on the Android
-emulator, `http://<PC-LAN-IP>:8080` on a physical device, or
+Set the mobile app backend base URL to `http://10.0.2.2:<PROXY_PORT>` on the
+Android emulator, `http://<PC-LAN-IP>:<PROXY_PORT>` on a physical device, or
 `https://<domain>` in production. Do not append `/api`.
 The default Compose binding is loopback-only; for a physical device, change the
 proxy's published host address to the PC's LAN interface and set `CADDY_SITE`
-to `http://<PC-LAN-IP>:8080`. Restrict LAN access to a trusted network.
+to `http://<PC-LAN-IP>:8080`. Restrict LAN access to a trusted network. On
+Windows, if Docker cannot bind the selected host port, inspect reserved TCP
+port ranges with:
 
-Check the proxy and API through the published origin:
+```powershell
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+Choose another available `PROXY_PORT` if the selected port is excluded.
+
+Check the proxy and API through the published origin. The examples below use
+the default port; replace `8080` with `PROXY_PORT` when using a different host
+port.
 
 ```powershell
 curl.exe -i http://localhost:8080/health
