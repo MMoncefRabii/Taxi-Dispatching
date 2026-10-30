@@ -1,6 +1,49 @@
+import java.net.URI
+import java.net.URISyntaxException
+import java.util.Properties
+
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+def signingValue = { String environmentName, String propertyName ->
+    System.getenv(environmentName) ?: keystoreProperties.getProperty(propertyName)
+}
+def releaseStorePath = signingValue("ANDROID_KEYSTORE_PATH", "storeFile")
+def releaseStoreFile = releaseStorePath
+    ? (new File(releaseStorePath).isAbsolute() ? file(releaseStorePath) : rootProject.file(releaseStorePath))
+    : null
+def releaseStorePassword = signingValue("ANDROID_KEYSTORE_PASSWORD", "storePassword")
+def releaseKeyAlias = signingValue("ANDROID_KEY_ALIAS", "keyAlias")
+def releaseKeyPassword = signingValue("ANDROID_KEY_PASSWORD", "keyPassword")
+def configuredReleaseApiBaseUrl = providers.gradleProperty("API_BASE_URL").orNull
+    ?: providers.environmentVariable("API_BASE_URL").orNull
+    ?: "https://REPLACE_WITH_API_DOMAIN"
+def releaseApiBaseUrl = configuredReleaseApiBaseUrl.trim().replaceAll('/+$', '')
+
+def isValidReleaseApiBaseUrl = { String value ->
+    try {
+        def uri = new URI(value)
+        return uri.scheme == "https" &&
+            uri.host &&
+            (!uri.path || uri.path == "/") &&
+            !uri.query &&
+            !uri.fragment &&
+            !uri.userInfo &&
+            !uri.host.endsWith(".example.invalid") &&
+            !uri.host.equalsIgnoreCase("REPLACE_WITH_API_DOMAIN") &&
+            !value.contains("<") &&
+            !value.contains(">")
+    } catch (URISyntaxException ignored) {
+        return false
+    }
+}
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -85,6 +128,9 @@ android {
         versionCode 1
         versionName "1.0"
     }
+    buildFeatures {
+        buildConfig true
+    }
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -92,19 +138,61 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            storeFile releaseStoreFile
+            storePassword releaseStorePassword ?: ""
+            keyAlias releaseKeyAlias ?: ""
+            keyPassword releaseKeyPassword ?: ""
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            buildConfigField "String", "API_BASE_URL", "\"http://10.0.2.2:8000\""
+            manifestPlaceholders = [usesCleartextTraffic: "true"]
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
+            buildConfigField "String", "API_BASE_URL", "\"${releaseApiBaseUrl}\""
+            manifestPlaceholders = [usesCleartextTraffic: "false"]
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
+}
+
+def validateReleaseConfiguration = tasks.register("validateReleaseConfiguration") {
+    doLast {
+        def missingSigningValues = []
+        if (!releaseStoreFile || !releaseStoreFile.isFile()) {
+            missingSigningValues.add("ANDROID_KEYSTORE_PATH/storeFile (must point to an existing keystore)")
+        }
+        if (!releaseStorePassword) {
+            missingSigningValues.add("ANDROID_KEYSTORE_PASSWORD/storePassword")
+        }
+        if (!releaseKeyAlias) {
+            missingSigningValues.add("ANDROID_KEY_ALIAS/keyAlias")
+        }
+        if (!releaseKeyPassword) {
+            missingSigningValues.add("ANDROID_KEY_PASSWORD/keyPassword")
+        }
+        if (missingSigningValues) {
+            throw new GradleException(
+                "Release signing is not configured. Supply ${missingSigningValues.join(', ')} " +
+                    "as environment variables or in android/keystore.properties."
+            )
+        }
+        if (!isValidReleaseApiBaseUrl(releaseApiBaseUrl)) {
+            throw new GradleException(
+                "Invalid release API_BASE_URL. Set it to an HTTPS origin with no path, query, or fragment; " +
+                    "the placeholder URL is not allowed."
+            )
+        }
+    }
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(validateReleaseConfiguration)
 }
 
 dependencies {

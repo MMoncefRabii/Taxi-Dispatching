@@ -37,7 +37,10 @@ export function SettingsScreen({ onBack, onLogout }: Props) {
       Alert.alert('Saved', 'Backend URL updated.');
     } catch (error) {
       console.warn('Unable to save backend URL:', error);
-      Alert.alert('Unable to save URL', 'Please try again.');
+      Alert.alert(
+        'Unable to save URL',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
     } finally {
       setSaving(false);
     }

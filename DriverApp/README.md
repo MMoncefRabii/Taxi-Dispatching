@@ -86,6 +86,23 @@ You've successfully run and modified your React Native App. :partying_face:
 
 If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
 
+## Android signed release
+
+Release builds require an HTTPS API origin and a private release keystore. The API URL must be an origin with no path, query, or fragment; the placeholder is rejected. Debug builds continue to use the emulator URL and permit cleartext traffic, while Android release builds reject cleartext traffic.
+
+Provide `API_BASE_URL` as a Gradle property or environment variable, and provide the signing values through environment variables or the ignored `android/keystore.properties` file. The required environment variables are `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`. The properties file uses `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. Relative keystore paths in that file are resolved from `DriverApp/android`.
+
+For a local Windows build, set those variables in the build shell and run:
+
+```powershell
+cd DriverApp\android
+.\gradlew.bat :app:assembleRelease -PAPI_BASE_URL=$env:API_BASE_URL
+```
+
+In CI, inject the keystore as a protected file and the alias/passwords as masked secrets; set `API_BASE_URL` to the production HTTPS origin and run the same Gradle task. Do not put credentials in the repository or command-line arguments. CI must not print secret variables or the keystore contents.
+
+Back up the release key securely and restrict access. For updates distributed outside Google Play, preserve the same signing key or users cannot install updates over the existing app. For Google Play App Signing, rotate an upload key through Play Console; changing the app-signing key requires the supported Play Console key-upgrade process. Update the protected CI keystore and associated credentials only as part of that planned rotation, and verify an update build before retiring the prior key.
+
 # Learn More
 
 To learn more about React Native, take a look at the following resources:
