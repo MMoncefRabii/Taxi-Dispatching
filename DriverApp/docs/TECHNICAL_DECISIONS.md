@@ -37,5 +37,5 @@
 - Known limitation: iOS background tracking is not implemented. Denied permissions block going online until the driver grants access in system settings.
 
 ## Backend URL configuration
-- What we chose: The backend URL defaults to `http://10.0.2.2:8000`, can be changed in Settings, and is persisted in AsyncStorage separately from the driver token.
-- Why: The Android emulator can reach the host machine through `10.0.2.2`, and an editable URL supports changing targets without rebuilding the app.
+- What we chose: Android debug builds default to `http://10.0.2.2:8000`, while release builds require an HTTPS origin supplied as `API_BASE_URL`. Settings can change the URL and persists it in AsyncStorage separately from the driver token; release URLs are validated as HTTPS origins without a path.
+- Why: The Android emulator can reach the host machine through `10.0.2.2`, while release traffic must use the production HTTPS API.

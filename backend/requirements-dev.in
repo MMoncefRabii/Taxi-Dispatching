@@ -1,4 +1,4 @@
 -r requirements.in
-pytest==8.4.2
+pytest==9.0.3
 httpx2
 pip-audit

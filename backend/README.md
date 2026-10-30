@@ -25,6 +25,15 @@ pip-audit -r requirements.txt
 pip-audit -r requirements-dev.txt
 ```
 
+CI commands (install the dev lock and run from `backend/`):
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+pip-audit -r requirements.txt
+pip-audit -r requirements-dev.txt
+```
+
 From the repository root, copy `.env.prod.example` to `.env.prod`, replace the placeholders, and keep the file private. `POSTGRES_USER`, `POSTGRES_DB`, and `POSTGRES_PASSWORD` configure PostgreSQL; `DATABASE_URL` must use the same values and point to host `db`, port `5432`, with the `postgresql+asyncpg` driver. URL-encode reserved characters in the URL password.
 
 Build the backend image and start the services:

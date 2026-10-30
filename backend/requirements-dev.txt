@@ -118,7 +118,7 @@ pygments==2.21.0
     #   rich
 pyparsing==3.3.3
     # via pip-requirements-parser
-pytest==8.4.2
+pytest==9.0.3
     # via -r requirements-dev.in
 python-dotenv==1.2.4
     # via

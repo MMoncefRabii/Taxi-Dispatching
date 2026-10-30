@@ -2,8 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React, { useEffect, useState } from 'react';
-import { Alert, StatusBar } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Alert, StatusBar, StyleSheet, Text } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { getBackendUrl } from './src/api/constants';
 import { setUnauthorizedHandler } from './src/api/client';
 import { locationQueue } from './src/location/queue';
 import { stopLocationTracking } from './src/location/tracker';
@@ -19,15 +20,50 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+const styles = StyleSheet.create({
+  configurationError: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
+  },
+});
+
 function AppNavigation() {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [configurationError, setConfigurationError] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
-    AsyncStorage.getItem('driver_token')
-      .then(setToken)
-      .catch(error => console.warn('Unable to load driver token:', error))
-      .finally(() => setLoading(false));
+    let active = true;
+    Promise.all([
+      AsyncStorage.getItem('driver_token').catch(error => {
+        console.warn('Unable to load driver token:', error);
+        return null;
+      }),
+      getBackendUrl().catch(error => {
+        if (active) {
+          setConfigurationError(
+            error instanceof Error ? error.message : 'The API URL is invalid.',
+          );
+        }
+        return null;
+      }),
+    ])
+      .then(([savedToken]) => {
+        if (active) {
+          setToken(savedToken);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -97,6 +133,16 @@ function AppNavigation() {
 
   if (loading) {
     return null;
+  }
+
+  if (configurationError) {
+    return (
+      <SafeAreaView style={styles.configurationError}>
+        <Text accessibilityRole="alert">
+          App configuration error: {configurationError}
+        </Text>
+      </SafeAreaView>
+    );
   }
 
   return (
